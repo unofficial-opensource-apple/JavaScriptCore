@@ -1,3 +1,4 @@
+/* -*- mode: c++; c-basic-offset: 4 -*- */
 /*
  *  Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -24,14 +25,6 @@
 /* don't use this for C++, it should only be used in plain C files or
    ObjC methods, where leaving off the parameter name is not allowed. */
 
-#include "Platform.h"
+#define UNUSED_PARAM(x) (void)x
 
-#if COMPILER(INTEL) && !OS(WINDOWS) || COMPILER(RVCT)
-template<typename T>
-inline void unusedParam(T& x) { (void)x; }
-#define UNUSED_PARAM(variable) unusedParam(variable)
-#else
-#define UNUSED_PARAM(variable) (void)variable
-#endif
-
-#endif /* WTF_UnusedParam_h */
+#endif // WTF_UnusedParam_h

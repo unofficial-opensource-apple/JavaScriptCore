@@ -1,5 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,33 +28,32 @@
 #define JSCallbackConstructor_h
 
 #include "JSObjectRef.h"
-#include <runtime/JSObjectWithGlobalObject.h>
+#include <kjs/object.h>
 
-namespace JSC {
+namespace KJS {
 
-class JSCallbackConstructor : public JSObjectWithGlobalObject {
+class JSCallbackConstructor : public JSObject
+{
 public:
-    JSCallbackConstructor(JSGlobalObject*, Structure*, JSClassRef, JSObjectCallAsConstructorCallback);
+    JSCallbackConstructor(ExecState* exec, JSClassRef jsClass, JSObjectCallAsConstructorCallback callback);
     virtual ~JSCallbackConstructor();
-    JSClassRef classRef() const { return m_class; }
-    JSObjectCallAsConstructorCallback callback() const { return m_callback; }
-    static const ClassInfo s_info;
-
-    static Structure* createStructure(JSGlobalData& globalData, JSValue proto) 
-    {
-        return Structure::create(globalData, proto, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount, &s_info);
-    }
-
-protected:
-    static const unsigned StructureFlags = ImplementsHasInstance | JSObject::StructureFlags;
-
+    
+    virtual bool implementsHasInstance() const;
+    
+    virtual bool implementsConstruct() const;
+    virtual JSObject* construct(ExecState*, const List &args);
+    
+    virtual const ClassInfo *classInfo() const { return &info; }
+    static const ClassInfo info;
+    
 private:
-    virtual ConstructType getConstructData(ConstructData&);
+    JSCallbackConstructor(); // prevent default construction
+    JSCallbackConstructor(const JSCallbackConstructor&);
 
     JSClassRef m_class;
     JSObjectCallAsConstructorCallback m_callback;
 };
 
-} // namespace JSC
+} // namespace KJS
 
 #endif // JSCallbackConstructor_h

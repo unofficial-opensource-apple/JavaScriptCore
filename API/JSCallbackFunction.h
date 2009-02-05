@@ -1,5 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,32 +27,30 @@
 #ifndef JSCallbackFunction_h
 #define JSCallbackFunction_h
 
-#include "InternalFunction.h"
 #include "JSObjectRef.h"
+#include "function.h"
+#include "object.h"
 
-namespace JSC {
+namespace KJS {
 
-class JSCallbackFunction : public InternalFunction {
+class JSCallbackFunction : public InternalFunctionImp
+{
 public:
-    JSCallbackFunction(ExecState*, JSGlobalObject*, JSObjectCallAsFunctionCallback, const Identifier& name);
+    JSCallbackFunction(ExecState* exec, JSObjectCallAsFunctionCallback callback, const Identifier& name);
 
-    static const ClassInfo s_info;
+    virtual bool implementsHasInstance() const;
+    virtual JSValue* callAsFunction(ExecState*, JSObject* thisObj, const List &args);
+
+    virtual const ClassInfo *classInfo() const { return &info; }
+    static const ClassInfo info;
     
-    // InternalFunction mish-mashes constructor and function behavior -- we should 
-    // refactor the code so this override isn't necessary
-    static Structure* createStructure(JSGlobalData& globalData, JSValue proto) 
-    { 
-        return Structure::create(globalData, proto, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount, &s_info); 
-    }
-
 private:
-    virtual CallType getCallData(CallData&);
-
-    static EncodedJSValue JSC_HOST_CALL call(ExecState*);
-
+    JSCallbackFunction(); // prevent default construction
+    JSCallbackFunction(const JSCallbackFunction&);
+    
     JSObjectCallAsFunctionCallback m_callback;
 };
 
-} // namespace JSC
+} // namespace KJS
 
 #endif // JSCallbackFunction_h

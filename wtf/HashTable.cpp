@@ -1,5 +1,7 @@
 /*
-    Copyright (C) 2005 Apple Inc. All rights reserved.
+    This file is part of the KDE libraries
+
+    Copyright (C) 2005 Apple Computer
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -34,17 +36,9 @@ int HashTableStats::numReinserts;
 
 static HashTableStats logger;
 
-static Mutex& hashTableStatsMutex()
-{
-    AtomicallyInitializedStatic(Mutex&, mutex = *new Mutex);
-    return mutex;
-}
-
 HashTableStats::~HashTableStats()
 {
-    // Don't lock hashTableStatsMutex here because it can cause deadlocks at shutdown 
-    // if any thread was killed while holding the mutex.
-    printf("\nWTF::HashTable statistics\n\n");
+    printf("\nkhtml::HashTable statistics\n\n");
     printf("%d accesses\n", numAccesses);
     printf("%d total collisions, average %.2f probes per access\n", numCollisions, 1.0 * (numAccesses + numCollisions) / numAccesses);
     printf("longest collision chain: %d\n", maxCollisions);
@@ -57,7 +51,6 @@ HashTableStats::~HashTableStats()
 
 void HashTableStats::recordCollisionAtCount(int count)
 {
-    MutexLocker lock(hashTableStatsMutex());
     if (count > maxCollisions)
         maxCollisions = count;
     numCollisions++;

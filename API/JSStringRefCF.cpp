@@ -1,3 +1,4 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
  * Copyright (C) 2006, 2007 Apple Computer, Inc.  All rights reserved.
  *
@@ -27,31 +28,30 @@
 #include "JSStringRefCF.h"
 
 #include "APICast.h"
-#include "InitializeThreading.h"
 #include "JSStringRef.h"
-#include "OpaqueJSString.h"
-#include <runtime/UString.h>
-#include <runtime/JSValue.h>
-#include <wtf/OwnArrayPtr.h>
+#include <kjs/JSLock.h>
+#include <kjs/ustring.h>
+#include <kjs/value.h>
+
+using namespace KJS;
 
 JSStringRef JSStringCreateWithCFString(CFStringRef string)
 {
-    JSC::initializeThreading();
-
-    // We cannot use CFIndex here since CFStringGetLength can return values larger than
-    // it can hold.  (<rdar://problem/6806478>)
-    size_t length = CFStringGetLength(string);
-    if (length) {
-        OwnArrayPtr<UniChar> buffer = adoptArrayPtr(new UniChar[length]);
-        CFStringGetCharacters(string, CFRangeMake(0, length), buffer.get());
-        COMPILE_ASSERT(sizeof(UniChar) == sizeof(UChar), unichar_and_uchar_must_be_same_size);
-        return OpaqueJSString::create(reinterpret_cast<UChar*>(buffer.get()), length).leakRef();
-    } else {
-        return OpaqueJSString::create(0, 0).leakRef();
+    JSLock lock;
+    CFIndex length = CFStringGetLength(string);
+    UString::Rep* rep;
+    if (!length)
+        rep = UString("").rep()->ref();
+    else {
+        UniChar* buffer = static_cast<UniChar*>(fastMalloc(sizeof(UniChar) * length));
+        CFStringGetCharacters(string, CFRangeMake(0, length), buffer);
+        rep = UString(reinterpret_cast<UChar*>(buffer), length, false).rep()->ref();
     }
+    return toRef(rep);
 }
 
 CFStringRef JSStringCopyCFString(CFAllocatorRef alloc, JSStringRef string)
 {
-    return CFStringCreateWithCharacters(alloc, reinterpret_cast<const UniChar*>(string->characters()), string->length());
+    UString::Rep* rep = toJS(string);
+    return CFStringCreateWithCharacters(alloc, reinterpret_cast<const UniChar*>(rep->data()), rep->size());
 }

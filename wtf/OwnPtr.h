@@ -1,5 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- *  Copyright (C) 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ *  Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -21,43 +22,58 @@
 #ifndef WTF_OwnPtr_h
 #define WTF_OwnPtr_h
 
-#include "Assertions.h"
-#include "NullPtr.h"
-#include "OwnPtrCommon.h"
-#include "TypeTraits.h"
 #include <algorithm>
-#include <memory>
+#include <wtf/Assertions.h>
+#include <wtf/Noncopyable.h>
+
+#if PLATFORM(WIN)
+
+typedef struct HBITMAP__* HBITMAP;
+typedef struct HBRUSH__* HBRUSH;
+typedef struct HFONT__* HFONT;
+typedef struct HPALETTE__* HPALETTE;
+typedef struct HPEN__* HPEN;
+typedef struct HRGN__* HRGN;
+
+#endif
 
 namespace WTF {
 
     // Unlike most of our smart pointers, OwnPtr can take either the pointer type or the pointed-to type.
 
-    template<typename T> class PassOwnPtr;
-    template<typename T> PassOwnPtr<T> adoptPtr(T*);
+    // FIXME: Share a single RemovePointer class template with RetainPtr.
+    template <typename T> struct OwnPtrRemovePointer { typedef T type; };
+    template <typename T> struct OwnPtrRemovePointer<T*> { typedef T type; };
 
-    template<typename T> class OwnPtr {
+    template <typename T> inline void deleteOwnedPtr(T* ptr)
+    {
+        typedef char known[sizeof(T) ? 1 : -1];
+        if (sizeof(known))
+            delete ptr;
+    }
+
+#if PLATFORM(WIN)
+    void deleteOwnedPtr(HBITMAP);
+    void deleteOwnedPtr(HBRUSH);
+    void deleteOwnedPtr(HFONT);
+    void deleteOwnedPtr(HPALETTE);
+    void deleteOwnedPtr(HPEN);
+    void deleteOwnedPtr(HRGN);
+#endif
+
+    template <typename T> class OwnPtr : Noncopyable {
     public:
-        typedef typename RemovePointer<T>::Type ValueType;
+        typedef typename OwnPtrRemovePointer<T>::type ValueType;
         typedef ValueType* PtrType;
 
-        OwnPtr() : m_ptr(0) { }
-
-        // See comment in PassOwnPtr.h for why this takes a const reference.
-        template<typename U> OwnPtr(const PassOwnPtr<U>& o);
-
-        // This copy constructor is used implicitly by gcc when it generates
-        // transients for assigning a PassOwnPtr<T> object to a stack-allocated
-        // OwnPtr<T> object. It should never be called explicitly and gcc
-        // should optimize away the constructor when generating code.
-        OwnPtr(const OwnPtr<ValueType>&);
-
+        explicit OwnPtr(PtrType ptr = 0) : m_ptr(ptr) { }
         ~OwnPtr() { deleteOwnedPtr(m_ptr); }
 
         PtrType get() const { return m_ptr; }
+        PtrType release() { PtrType ptr = m_ptr; m_ptr = 0; return ptr; }
 
-        void clear();
-        PassOwnPtr<T> release();
-        PtrType leakPtr() WARN_UNUSED_RETURN;
+        void set(PtrType ptr) { ASSERT(!ptr || m_ptr != ptr); deleteOwnedPtr(m_ptr); m_ptr = ptr; }
+        void clear() { deleteOwnedPtr(m_ptr); m_ptr = 0; }
 
         ValueType& operator*() const { ASSERT(m_ptr); return *m_ptr; }
         PtrType operator->() const { ASSERT(m_ptr); return m_ptr; }
@@ -65,113 +81,18 @@ namespace WTF {
         bool operator!() const { return !m_ptr; }
 
         // This conversion operator allows implicit conversion to bool but not to other integer types.
-        typedef PtrType OwnPtr::*UnspecifiedBoolType;
-        operator UnspecifiedBoolType() const { return m_ptr ? &OwnPtr::m_ptr : 0; }
-
-        OwnPtr& operator=(const PassOwnPtr<T>&);
-        OwnPtr& operator=(std::nullptr_t) { clear(); return *this; }
-        template<typename U> OwnPtr& operator=(const PassOwnPtr<U>&);
+        typedef PtrType (OwnPtr::*UnspecifiedBoolType)() const;
+        operator UnspecifiedBoolType() const { return m_ptr ? &OwnPtr::get : 0; }
 
         void swap(OwnPtr& o) { std::swap(m_ptr, o.m_ptr); }
 
-#ifdef LOOSE_OWN_PTR
-        explicit OwnPtr(PtrType ptr) : m_ptr(ptr) { }
-        void set(PtrType);
-#endif
-
     private:
-        OwnPtr& operator=(const OwnPtr<T>&);
-
-        // We should never have two OwnPtrs for the same underlying object (otherwise we'll get
-        // double-destruction), so these equality operators should never be needed.
-        template<typename U> bool operator==(const OwnPtr<U>&) { COMPILE_ASSERT(!sizeof(U*), OwnPtrs_should_never_be_equal); return false; }
-        template<typename U> bool operator!=(const OwnPtr<U>&) { COMPILE_ASSERT(!sizeof(U*), OwnPtrs_should_never_be_equal); return false; }
-        template<typename U> bool operator==(const PassOwnPtr<U>&) { COMPILE_ASSERT(!sizeof(U*), OwnPtrs_should_never_be_equal); return false; }
-        template<typename U> bool operator!=(const PassOwnPtr<U>&) { COMPILE_ASSERT(!sizeof(U*), OwnPtrs_should_never_be_equal); return false; }
-
         PtrType m_ptr;
     };
+    
+    template <typename T> inline void swap(OwnPtr<T>& a, OwnPtr<T>& b) { a.swap(b); }
 
-    template<typename T> template<typename U> inline OwnPtr<T>::OwnPtr(const PassOwnPtr<U>& o)
-        : m_ptr(o.leakPtr())
-    {
-    }
-
-    template<typename T> inline void OwnPtr<T>::clear()
-    {
-        PtrType ptr = m_ptr;
-        m_ptr = 0;
-        deleteOwnedPtr(ptr);
-    }
-
-    template<typename T> inline PassOwnPtr<T> OwnPtr<T>::release()
-    {
-        PtrType ptr = m_ptr;
-        m_ptr = 0;
-        return adoptPtr(ptr);
-    }
-
-    template<typename T> inline typename OwnPtr<T>::PtrType OwnPtr<T>::leakPtr()
-    {
-        PtrType ptr = m_ptr;
-        m_ptr = 0;
-        return ptr;
-    }
-
-#ifdef LOOSE_OWN_PTR
-    template<typename T> inline void OwnPtr<T>::set(PtrType ptr)
-    {
-        ASSERT(!ptr || m_ptr != ptr);
-        PtrType oldPtr = m_ptr;
-        m_ptr = ptr;
-        deleteOwnedPtr(oldPtr);
-    }
-#endif
-
-    template<typename T> inline OwnPtr<T>& OwnPtr<T>::operator=(const PassOwnPtr<T>& o)
-    {
-        PtrType ptr = m_ptr;
-        m_ptr = o.leakPtr();
-        ASSERT(!ptr || m_ptr != ptr);
-        deleteOwnedPtr(ptr);
-        return *this;
-    }
-
-    template<typename T> template<typename U> inline OwnPtr<T>& OwnPtr<T>::operator=(const PassOwnPtr<U>& o)
-    {
-        PtrType ptr = m_ptr;
-        m_ptr = o.leakPtr();
-        ASSERT(!ptr || m_ptr != ptr);
-        deleteOwnedPtr(ptr);
-        return *this;
-    }
-
-    template<typename T> inline void swap(OwnPtr<T>& a, OwnPtr<T>& b)
-    {
-        a.swap(b);
-    }
-
-    template<typename T, typename U> inline bool operator==(const OwnPtr<T>& a, U* b)
-    {
-        return a.get() == b; 
-    }
-
-    template<typename T, typename U> inline bool operator==(T* a, const OwnPtr<U>& b) 
-    {
-        return a == b.get(); 
-    }
-
-    template<typename T, typename U> inline bool operator!=(const OwnPtr<T>& a, U* b)
-    {
-        return a.get() != b; 
-    }
-
-    template<typename T, typename U> inline bool operator!=(T* a, const OwnPtr<U>& b)
-    {
-        return a != b.get(); 
-    }
-
-    template<typename T> inline typename OwnPtr<T>::PtrType getPtr(const OwnPtr<T>& p)
+    template <typename T> inline typename OwnPtr<T>::PtrType getPtr(const OwnPtr<T>& p)
     {
         return p.get();
     }

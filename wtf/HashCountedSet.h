@@ -1,5 +1,7 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * This file is part of the KDE libraries
+ * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,13 +25,11 @@
 
 #include "Assertions.h"
 #include "HashMap.h"
-#include "Vector.h"
 
 namespace WTF {
 
     template<typename Value, typename HashFunctions = typename DefaultHash<Value>::Hash,
         typename Traits = HashTraits<Value> > class HashCountedSet {
-        WTF_MAKE_FAST_ALLOCATED;
     private:
         typedef HashMap<Value, unsigned, HashFunctions, Traits> ImplType;
     public:
@@ -43,34 +43,29 @@ namespace WTF {
         int capacity() const;
         bool isEmpty() const;
         
-        // Iterators iterate over pairs of values and counts.
+        // iterators iterate over pairs of values and counts
         iterator begin();
         iterator end();
         const_iterator begin() const;
         const_iterator end() const;
         
-        iterator find(const ValueType&);
-        const_iterator find(const ValueType&) const;
-        bool contains(const ValueType&) const;
-        unsigned count(const ValueType&) const;
+        iterator find(const ValueType& value);
+        const_iterator find(const ValueType& value) const;
+        bool contains(const ValueType& value) const;
+        unsigned count(const ValueType& value) const;
 
-        // Increases the count if an equal value is already present
-        // the return value is a pair of an interator to the new value's 
-        // location, and a bool that is true if an new entry was added.
-        std::pair<iterator, bool> add(const ValueType&);
+        // increases the count if an equal value is already present
+        // the return value is a pair of an interator to the new value's location, 
+        // and a bool that is true if an new entry was added
+        std::pair<iterator, bool> add(const ValueType &value);
         
-        // Reduces the count of the value, and removes it if count
-        // goes down to zero, returns true if the value is removed.
-        bool remove(const ValueType&);
-        bool remove(iterator);
+        // reduces the count of the value, and removes it if count
+        // goes down to zero
+        void remove(const ValueType& value);
+        void remove(iterator it);
  
-        // Removes the value, regardless of its count.
-        void removeAll(iterator);
-        void removeAll(const ValueType&);
-
-        // Clears the whole set.
-        void clear();
-
+       void clear();
+        
     private:
         ImplType m_impl;
     };
@@ -150,42 +145,24 @@ namespace WTF {
     }
     
     template<typename Value, typename HashFunctions, typename Traits>
-    inline bool HashCountedSet<Value, HashFunctions, Traits>::remove(const ValueType& value)
+    inline void HashCountedSet<Value, HashFunctions, Traits>::remove(const ValueType& value)
     {
-        return remove(find(value));
+        remove(find(value));
     }
     
     template<typename Value, typename HashFunctions, typename Traits>
-    inline bool HashCountedSet<Value, HashFunctions, Traits>::remove(iterator it)
-    {
-        if (it == end())
-            return false;
-
-        unsigned oldVal = it->second;
-        ASSERT(oldVal);
-        unsigned newVal = oldVal - 1;
-        if (newVal) {
-            it->second = newVal;
-            return false;
-        }
-
-        m_impl.remove(it);
-        return true;
-    }
-    
-    template<typename Value, typename HashFunctions, typename Traits>
-    inline void HashCountedSet<Value, HashFunctions, Traits>::removeAll(const ValueType& value)
-    {
-        removeAll(find(value));
-    }
-    
-    template<typename Value, typename HashFunctions, typename Traits>
-    inline void HashCountedSet<Value, HashFunctions, Traits>::removeAll(iterator it)
+    inline void HashCountedSet<Value, HashFunctions, Traits>::remove(iterator it)
     {
         if (it == end())
             return;
 
-        m_impl.remove(it);
+        unsigned oldVal = it->second;
+        ASSERT(oldVal != 0);
+        unsigned newVal = oldVal - 1;
+        if (newVal == 0)
+            m_impl.remove(it);
+        else
+            it->second = newVal;
     }
     
     template<typename Value, typename HashFunctions, typename Traits>
@@ -193,33 +170,6 @@ namespace WTF {
     {
         m_impl.clear(); 
     }
-    
-    template<typename Value, typename HashFunctions, typename Traits, typename VectorType>
-    inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits>& collection, VectorType& vector)
-    {
-        typedef typename HashCountedSet<Value, HashFunctions, Traits>::const_iterator iterator;
-        
-        vector.resize(collection.size());
-        
-        iterator it = collection.begin();
-        iterator end = collection.end();
-        for (unsigned i = 0; it != end; ++it, ++i)
-            vector[i] = *it;
-    }
-
-    template<typename Value, typename HashFunctions, typename Traits>
-    inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits>& collection, Vector<Value>& vector)
-    {
-        typedef typename HashCountedSet<Value, HashFunctions, Traits>::const_iterator iterator;
-        
-        vector.resize(collection.size());
-        
-        iterator it = collection.begin();
-        iterator end = collection.end();
-        for (unsigned i = 0; it != end; ++it, ++i)
-            vector[i] = (*it).first;
-    }
-
 
 } // namespace khtml
 

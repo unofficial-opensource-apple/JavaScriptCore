@@ -1,5 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- *  Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2005, 2006 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -34,8 +35,12 @@ namespace WTF {
         ListRefPtr(const RefPtr<T>& o) : RefPtr<T>(o) {}
         // see comment in PassRefPtr.h for why this takes const reference
         template <typename U> ListRefPtr(const PassRefPtr<U>& o) : RefPtr<T>(o) {}
-        
-        ~ListRefPtr();
+
+        ~ListRefPtr() {
+            RefPtr<T> reaper = this->release();
+            while (reaper && reaper->refcount() == 1)
+                reaper = reaper->releaseNext(); // implicitly protects reaper->next, then derefs reaper
+        }
         
         ListRefPtr& operator=(T* optr) { RefPtr<T>::operator=(optr); return *this; }
         ListRefPtr& operator=(const RefPtr<T>& o) { RefPtr<T>::operator=(o); return *this; }
@@ -43,20 +48,6 @@ namespace WTF {
         template <typename U> ListRefPtr& operator=(const RefPtr<U>& o) { RefPtr<T>::operator=(o); return *this; }
         template <typename U> ListRefPtr& operator=(const PassRefPtr<U>& o) { RefPtr<T>::operator=(o); return *this; }
     };
-
-    // Remove inline for winscw compiler to prevent the compiler agressively resolving
-    // T::ref() in RefPtr<T>'s copy constructor.  The bug is reported at:
-    // https://xdabug001.ext.nokia.com/bugzilla/show_bug.cgi?id=9812.
-    template <typename T> 
-#if !COMPILER(WINSCW)
-    inline
-#endif
-    ListRefPtr<T>::~ListRefPtr()
-    {
-        RefPtr<T> reaper = this->release();
-        while (reaper && reaper->hasOneRef())
-            reaper = reaper->releaseNext(); // implicitly protects reaper->next, then derefs reaper
-    }
 
     template <typename T> inline T* getPtr(const ListRefPtr<T>& p)
     {

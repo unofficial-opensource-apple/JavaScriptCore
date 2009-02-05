@@ -1,5 +1,7 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * This file is part of the KDE libraries
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,18 +23,33 @@
 #ifndef WTF_VectorTraits_h
 #define WTF_VectorTraits_h
 
-#include "OwnPtr.h"
 #include "RefPtr.h"
-#include "TypeTraits.h"
 #include <utility>
-#include <memory>
 
 using std::pair;
 
 namespace WTF {
 
+    template <typename T> struct IsPod           { static const bool value = false; };
+    template <> struct IsPod<bool>               { static const bool value = true; };
+    template <> struct IsPod<char>               { static const bool value = true; };
+    template <> struct IsPod<signed char>        { static const bool value = true; };
+    template <> struct IsPod<unsigned char>      { static const bool value = true; };
+    template <> struct IsPod<short>              { static const bool value = true; };
+    template <> struct IsPod<unsigned short>     { static const bool value = true; };
+    template <> struct IsPod<int>                { static const bool value = true; };
+    template <> struct IsPod<unsigned int>       { static const bool value = true; };
+    template <> struct IsPod<long>               { static const bool value = true; };
+    template <> struct IsPod<unsigned long>      { static const bool value = true; };
+    template <> struct IsPod<long long>          { static const bool value = true; };
+    template <> struct IsPod<unsigned long long> { static const bool value = true; };
+    template <> struct IsPod<float>              { static const bool value = true; };
+    template <> struct IsPod<double>             { static const bool value = true; };
+    template <> struct IsPod<long double>        { static const bool value = true; };
+    template <typename P> struct IsPod<P *>      { static const bool value = true; };
+
     template<bool isPod, typename T>
-    struct VectorTraitsBase;
+    class VectorTraitsBase;
 
     template<typename T>
     struct VectorTraitsBase<false, T>
@@ -61,21 +78,22 @@ namespace WTF {
     template<typename T>
     struct VectorTraits : VectorTraitsBase<IsPod<T>::value, T> { };
 
-    struct SimpleClassVectorTraits : VectorTraitsBase<false, void>
+    struct SimpleClassVectorTraits
     {
+        static const bool needsDestruction = true;
+        static const bool needsInitialization = true;
         static const bool canInitializeWithMemset = true;
         static const bool canMoveWithMemcpy = true;
+        static const bool canCopyWithMemcpy = false;
+        static const bool canFillWithMemset = false;
         static const bool canCompareWithMemcmp = true;
     };
 
-    // we know OwnPtr and RefPtr are simple enough that initializing to 0 and moving with memcpy
+    // we know RefPtr is simple enough that initializing to 0 and moving with memcpy
     // (and then not destructing the original) will totally work
     template<typename P>
     struct VectorTraits<RefPtr<P> > : SimpleClassVectorTraits { };
-
-    template<typename P>
-    struct VectorTraits<OwnPtr<P> > : SimpleClassVectorTraits { };
-
+    
     template<typename First, typename Second>
     struct VectorTraits<pair<First, Second> >
     {
