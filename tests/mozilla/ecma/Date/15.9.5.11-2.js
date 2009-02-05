@@ -43,8 +43,12 @@
 
     var TZ_ADJUST = TZ_DIFF * msPerHour;
 
+    // calculate time for year 0
+    for ( var time = 0, year = 1969; year >= 0; year-- ) {
+        time -= TimeInYear(year);
+    }
 
-    addTestCase( TIME_YEAR_0 );
+    addTestCase( time );
 
     test();
 function addTestCase( t ) {
