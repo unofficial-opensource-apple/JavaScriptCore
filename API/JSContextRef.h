@@ -45,7 +45,7 @@ extern "C" {
  NULL to use the default object class.
 @result A JSGlobalContext with a global object of class globalObjectClass.
 */
-JS_EXPORT JSGlobalContextRef JSGlobalContextCreate(JSClassRef globalObjectClass);
+JSGlobalContextRef JSGlobalContextCreate(JSClassRef globalObjectClass);
 
 /*!
 @function
@@ -53,14 +53,14 @@ JS_EXPORT JSGlobalContextRef JSGlobalContextCreate(JSClassRef globalObjectClass)
 @param ctx The JSGlobalContext to retain.
 @result A JSGlobalContext that is the same as ctx.
 */
-JS_EXPORT JSGlobalContextRef JSGlobalContextRetain(JSGlobalContextRef ctx);
+JSGlobalContextRef JSGlobalContextRetain(JSGlobalContextRef ctx);
 
 /*!
 @function
 @abstract Releases a global JavaScript execution context.
 @param ctx The JSGlobalContext to release.
 */
-JS_EXPORT void JSGlobalContextRelease(JSGlobalContextRef ctx);
+void JSGlobalContextRelease(JSGlobalContextRef ctx);
 
 /*!
 @function
@@ -68,7 +68,7 @@ JS_EXPORT void JSGlobalContextRelease(JSGlobalContextRef ctx);
 @param ctx The JSContext whose global object you want to get.
 @result ctx's global object.
 */
-JS_EXPORT JSObjectRef JSContextGetGlobalObject(JSContextRef ctx);
+JSObjectRef JSContextGetGlobalObject(JSContextRef ctx);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,6 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,20 +24,15 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
 #include "JSCallbackConstructor.h"
-
 #include "APICast.h"
-#include <kjs/JSGlobalObject.h>
-#include <kjs/object_object.h>
-#include <wtf/Vector.h>
 
 namespace KJS {
 
-const ClassInfo JSCallbackConstructor::info = { "CallbackConstructor", 0, 0};
+const ClassInfo JSCallbackConstructor::info = { "CallbackConstructor", 0, 0, 0 };
 
 JSCallbackConstructor::JSCallbackConstructor(ExecState* exec, JSClassRef jsClass, JSObjectCallAsConstructorCallback callback)
-    : JSObject(exec->lexicalGlobalObject()->objectPrototype())
+    : JSObject(exec->lexicalInterpreter()->builtinObjectPrototype())
     , m_class(jsClass)
     , m_callback(callback)
 {
@@ -67,13 +62,11 @@ JSObject* JSCallbackConstructor::construct(ExecState* exec, const List &args)
     JSObjectRef thisRef = toRef(this);
 
     if (m_callback) {
-        int argumentCount = static_cast<int>(args.size());
-        Vector<JSValueRef, 16> arguments(argumentCount);
-        for (int i = 0; i < argumentCount; i++)
+        size_t argumentCount = args.size();
+        JSValueRef arguments[argumentCount];
+        for (size_t i = 0; i < argumentCount; i++)
             arguments[i] = toRef(args[i]);
-            
-        JSLock::DropAllLocks dropAllLocks;
-        return toJS(m_callback(ctx, thisRef, argumentCount, arguments.data(), toRef(exec->exceptionSlot())));
+        return toJS(m_callback(ctx, thisRef, argumentCount, arguments, toRef(exec->exceptionSlot())));
     }
     
     return toJS(JSObjectMake(ctx, m_class, 0));

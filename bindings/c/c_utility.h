@@ -26,20 +26,15 @@
 #ifndef C_UTILITY_H_
 #define C_UTILITY_H_
 
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
+#include "npruntime.h"
 
 namespace KJS {
 
 class ExecState;
-class Identifier;
 class JSValue;
 
 namespace Bindings {
 
-class RootObject;
-    
 typedef uint16_t NPUTF16;
 
 enum NP_ValueType {
@@ -53,9 +48,10 @@ enum NP_ValueType {
 };
 
 void convertNPStringToUTF16(const NPString*, NPUTF16** UTF16Chars, unsigned int* UTF16Length);
+void convertUTF8ToUTF16(const NPUTF8* UTF8Chars, int UTF8Length, NPUTF16** UTF16Chars, unsigned int* UTF16Length);
+void coerceValueToNPVariantStringType(ExecState*, JSValue*, NPVariant* result);
 void convertValueToNPVariant(ExecState*, JSValue*, NPVariant* result);
-JSValue* convertNPVariantToValue(ExecState*, const NPVariant*, RootObject*);
-Identifier identifierFromNPIdentifier(const NPUTF8* name);
+JSValue* convertNPVariantToValue(ExecState*, const NPVariant*);
 
 struct PrivateIdentifier {
     union {
@@ -66,7 +62,5 @@ struct PrivateIdentifier {
 };
 
 } }
-
-#endif // ENABLE(NETSCAPE_API)
 
 #endif

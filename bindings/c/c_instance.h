@@ -26,12 +26,8 @@
 #ifndef BINDINGS_C_INSTANCE_H_
 #define BINDINGS_C_INSTANCE_H_
 
-#if ENABLE(NETSCAPE_API)
-
+#include "npruntime.h"
 #include "runtime.h"
-#include <wtf/Noncopyable.h>
-
-typedef struct NPObject NPObject;
 
 namespace KJS {
 
@@ -39,12 +35,18 @@ namespace Bindings {
 
 class CClass;
 
-class CInstance : public Instance {
+class CInstance : public Instance
+{
 public:
-    CInstance (NPObject*, PassRefPtr<RootObject>);
+    CInstance (NPObject *instance);
+        
     ~CInstance ();
     
     virtual Class *getClass() const;
+    
+    CInstance (const CInstance &other);
+
+    CInstance &operator=(const CInstance &other);
     
     virtual void begin();
     virtual void end();
@@ -56,15 +58,12 @@ public:
     
     virtual JSValue *invokeMethod (ExecState *exec, const MethodList &method, const List &args);
     virtual JSValue *invokeDefaultMethod (ExecState *exec, const List &args);
-    virtual void getPropertyNames(ExecState*, PropertyNameArray&);
 
     JSValue *stringValue() const;
     JSValue *numberValue() const;
     JSValue *booleanValue() const;
     
     NPObject *getObject() const { return _object; }
-
-    virtual BindingLanguage getBindingLanguage() const { return CLanguage; }
 
 private:
     mutable CClass *_class;
@@ -74,7 +73,5 @@ private:
 } // namespace Bindings
 
 } // namespace KJS
-
-#endif // ENABLE(NETSCAPE_API)
 
 #endif

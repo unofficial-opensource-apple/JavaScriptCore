@@ -24,22 +24,17 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
-#include <wtf/Platform.h>
 #include "JSCallbackFunction.h"
-
 #include "APICast.h"
 #include "function.h"
 #include "function_object.h"
-#include <kjs/JSGlobalObject.h>
-#include <wtf/Vector.h>
 
 namespace KJS {
 
-const ClassInfo JSCallbackFunction::info = { "CallbackFunction", &InternalFunctionImp::info, 0};
+const ClassInfo JSCallbackFunction::info = { "CallbackFunction", &InternalFunctionImp::info, 0, 0 };
 
 JSCallbackFunction::JSCallbackFunction(ExecState* exec, JSObjectCallAsFunctionCallback callback, const Identifier& name)
-    : InternalFunctionImp(exec->lexicalGlobalObject()->functionPrototype(), name)
+    : InternalFunctionImp(static_cast<FunctionPrototype*>(exec->lexicalInterpreter()->builtinFunctionPrototype()), name)
     , m_callback(callback)
 {
 }
@@ -56,13 +51,11 @@ JSValue* JSCallbackFunction::callAsFunction(ExecState* exec, JSObject* thisObj, 
     JSObjectRef thisRef = toRef(this);
     JSObjectRef thisObjRef = toRef(thisObj);
 
-    int argumentCount = static_cast<int>(args.size());
-    Vector<JSValueRef, 16> arguments(argumentCount);
-    for (int i = 0; i < argumentCount; i++)
+    size_t argumentCount = args.size();
+    JSValueRef arguments[argumentCount];
+    for (size_t i = 0; i < argumentCount; i++)
         arguments[i] = toRef(args[i]);
-
-    JSLock::DropAllLocks dropAllLocks;
-    return toJS(m_callback(execRef, thisRef, thisObjRef, argumentCount, arguments.data(), toRef(exec->exceptionSlot())));
+    return toJS(m_callback(execRef, thisRef, thisObjRef, argumentCount, arguments, toRef(exec->exceptionSlot())));
 }
 
 } // namespace KJS

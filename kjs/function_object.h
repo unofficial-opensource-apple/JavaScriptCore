@@ -28,34 +28,53 @@
 
 namespace KJS {
 
-    /**
-     * @internal
-     *
-     * The initial value of Function.prototype (and thus all objects created
-     * with the Function constructor)
-     */
-    class FunctionPrototype : public InternalFunctionImp {
-    public:
-        FunctionPrototype(ExecState*);
+  /**
+   * @internal
+   *
+   * The initial value of Function.prototype (and thus all objects created
+   * with the Function constructor)
+   */
+  class FunctionPrototype : public InternalFunctionImp {
+  public:
+    FunctionPrototype(ExecState *exec);
+    virtual ~FunctionPrototype();
 
-        virtual JSValue* callAsFunction(ExecState*, JSObject*, const List&);
-    };
+    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
+  };
 
-    /**
-     * @internal
-     *
-     * The initial value of the the global variable's "Function" property
-     */
-    class FunctionObjectImp : public InternalFunctionImp {
-    public:
-        FunctionObjectImp(ExecState*, FunctionPrototype*);
+  /**
+   * @internal
+   *
+   * Class to implement all methods that are properties of the
+   * Function.prototype object
+   */
+  class FunctionProtoFunc : public InternalFunctionImp {
+  public:
+    FunctionProtoFunc(ExecState*, FunctionPrototype*, int i, int len, const Identifier&);
 
-        virtual bool implementsConstruct() const;
-        virtual JSObject* construct(ExecState*, const List&);
-        virtual JSObject* construct(ExecState*, const List&, const Identifier& functionName, const UString& sourceURL, int lineNumber);
-        virtual JSValue* callAsFunction(ExecState*, JSObject*, const List&);
-    };
+    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
 
-} // namespace KJS
+    enum { ToString, Apply, Call };
+  private:
+    int id;
+  };
+
+  /**
+   * @internal
+   *
+   * The initial value of the the global variable's "Function" property
+   */
+  class FunctionObjectImp : public InternalFunctionImp {
+  public:
+    FunctionObjectImp(ExecState*, FunctionPrototype*);
+    virtual ~FunctionObjectImp();
+
+    virtual bool implementsConstruct() const;
+    virtual JSObject* construct(ExecState*, const List& args);
+    virtual JSObject* construct(ExecState*, const List& args, const Identifier& functionName, const UString& sourceURL, int lineNumber);
+    virtual JSValue* callAsFunction(ExecState*, JSObject* thisObj, const List& args);
+  };
+
+} // namespace
 
 #endif // _FUNCTION_OBJECT_H_

@@ -1,7 +1,8 @@
 /*
+ *  This file is part of the KDE libraries
  *  Copyright (C) 1999-2002 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2004, 2007, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2004 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -23,10 +24,10 @@
 #include "config.h"
 #include "internal.h"
 
-#include "ExecState.h"
 #include "array_object.h"
 #include "bool_object.h"
 #include "collector.h"
+#include "context.h"
 #include "date_object.h"
 #include "debugger.h"
 #include "error_object.h"
@@ -40,27 +41,24 @@
 #include "operations.h"
 #include "regexp_object.h"
 #include "string_object.h"
-#include <math.h>
-#include <stdio.h>
-#include <wtf/Assertions.h>
+#include <assert.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Vector.h>
+#include <math.h>
+#include <stdio.h>
 
 namespace KJS {
 
+#if PLATFORM(WIN_OS)
+#define copysign _copysign
+#endif
+
 // ------------------------------ StringImp ------------------------------------
 
-JSValue* StringImp::toPrimitive(ExecState*, JSType) const
+JSValue *StringImp::toPrimitive(ExecState *, JSType) const
 {
-  return const_cast<StringImp*>(this);
-}
-
-bool StringImp::getPrimitiveNumber(ExecState*, double& number, JSValue*& value)
-{
-    value = this;
-    number = val.toDouble();
-    return false;
+  return const_cast<StringImp *>(this);
 }
 
 bool StringImp::toBoolean(ExecState *) const
@@ -78,23 +76,16 @@ UString StringImp::toString(ExecState *) const
   return val;
 }
 
-JSObject* StringImp::toObject(ExecState *exec) const
+JSObject *StringImp::toObject(ExecState *exec) const
 {
-    return new StringInstance(exec->lexicalGlobalObject()->stringPrototype(), const_cast<StringImp*>(this));
+    return new StringInstance(exec->lexicalInterpreter()->builtinStringPrototype(), val);
 }
 
 // ------------------------------ NumberImp ------------------------------------
 
-JSValue* NumberImp::toPrimitive(ExecState*, JSType) const
+JSValue *NumberImp::toPrimitive(ExecState *, JSType) const
 {
-    return const_cast<NumberImp*>(this);
-}
-
-bool NumberImp::getPrimitiveNumber(ExecState*, double& number, JSValue*& value)
-{
-    number = val;
-    value = this;
-    return true;
+  return const_cast<NumberImp *>(this);
 }
 
 bool NumberImp::toBoolean(ExecState *) const
@@ -118,29 +109,15 @@ JSObject *NumberImp::toObject(ExecState *exec) const
 {
   List args;
   args.append(const_cast<NumberImp*>(this));
-  return static_cast<JSObject *>(exec->lexicalGlobalObject()->numberConstructor()->construct(exec,args));
+  return static_cast<JSObject *>(exec->lexicalInterpreter()->builtinNumber()->construct(exec,args));
 }
 
+// FIXME: We can optimize this to work like JSValue::getUInt32. I'm ignoring it for now
+// because it never shows up on profiles.
 bool NumberImp::getUInt32(uint32_t& uint32) const
 {
-    uint32 = static_cast<uint32_t>(val);
-    return uint32 == val;
-}
-
-bool NumberImp::getTruncatedInt32(int32_t& int32) const
-{
-    if (!(val >= -2147483648.0 && val < 2147483648.0))
-        return false;
-    int32 = static_cast<int32_t>(val);
-    return true;
-}
-
-bool NumberImp::getTruncatedUInt32(uint32_t& uint32) const
-{
-    if (!(val >= 0.0 && val < 4294967296.0))
-        return false;
-    uint32 = static_cast<uint32_t>(val);
-    return true;
+  uint32 = (uint32_t)val;
+  return (double)uint32 == val;
 }
 
 // --------------------------- GetterSetterImp ---------------------------------
@@ -154,41 +131,33 @@ void GetterSetterImp::mark()
         setter->mark();
 }
 
-JSValue* GetterSetterImp::toPrimitive(ExecState*, JSType) const
+JSValue *GetterSetterImp::toPrimitive(ExecState*, JSType) const
 {
-    ASSERT(false);
+    assert(false);
     return jsNull();
-}
-
-bool GetterSetterImp::getPrimitiveNumber(ExecState*, double& number, JSValue*& value)
-{
-    ASSERT_NOT_REACHED();
-    number = 0;
-    value = 0;
-    return true;
 }
 
 bool GetterSetterImp::toBoolean(ExecState*) const
 {
-    ASSERT(false);
+    assert(false);
     return false;
 }
 
 double GetterSetterImp::toNumber(ExecState *) const
 {
-    ASSERT(false);
+    assert(false);
     return 0.0;
 }
 
 UString GetterSetterImp::toString(ExecState *) const
 {
-    ASSERT(false);
+    assert(false);
     return UString::null();
 }
 
 JSObject *GetterSetterImp::toObject(ExecState *exec) const
 {
-    ASSERT(false);
+    assert(false);
     return jsNull()->toObject(exec);
 }
 
@@ -220,9 +189,14 @@ bool LabelStack::contains(const Identifier &id) const
 
 // ------------------------------ InternalFunctionImp --------------------------
 
-const ClassInfo InternalFunctionImp::info = { "Function", 0, 0 };
+const ClassInfo InternalFunctionImp::info = {"Function", 0, 0, 0};
 
 InternalFunctionImp::InternalFunctionImp()
+{
+}
+
+InternalFunctionImp::InternalFunctionImp(FunctionPrototype* funcProto)
+  : JSObject(funcProto)
 {
 }
 
@@ -243,6 +217,15 @@ bool InternalFunctionImp::implementsHasInstance() const
 }
 
 // ------------------------------ global functions -----------------------------
+
+double roundValue(ExecState *exec, JSValue *v)
+{
+  double d = v->toNumber(exec);
+  double ad = fabs(d);
+  if (ad == 0 || isNaN(d) || isInf(d))
+    return d;
+  return copysign(floor(ad), d);
+}
 
 #ifndef NDEBUG
 #include <stdio.h>

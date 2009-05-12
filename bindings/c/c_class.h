@@ -26,11 +26,8 @@
 #ifndef BINDINGS_C_CLASS_H_
 #define BINDINGS_C_CLASS_H_
 
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
+#include "npruntime.h"
 #include "runtime.h"
-#include <wtf/HashMap.h>
 
 namespace KJS {
 namespace Bindings {
@@ -44,18 +41,22 @@ public:
     virtual ~CClass();
 
     virtual const char* name() const;    
-    virtual MethodList methodsNamed(const Identifier&, Instance*) const;
-    virtual Field* fieldNamed(const Identifier&, Instance*) const;
+    virtual MethodList methodsNamed(const char* name, Instance*) const;
+    virtual Field* fieldNamed(const char* name, Instance*) const;
+
+    virtual Constructor* constructorAt(int) const { return 0; }
+    virtual int numConstructors() const { return 0; }
 
 private:
+    CClass(const CClass&); // prohibit copying
+    CClass& operator=(const CClass&); // prohibit assignment
+
     NPClass* _isa;
-    mutable MethodMap _methods;
-    mutable FieldMap _fields;
+    CFMutableDictionaryRef _methods;
+    CFMutableDictionaryRef _fields;
 };
 
 } // namespace Bindings
 } // namespace KJS
-
-#endif // ENABLE(NETSCAPE_API)
 
 #endif

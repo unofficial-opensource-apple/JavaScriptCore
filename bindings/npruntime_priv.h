@@ -26,9 +26,7 @@
 #ifndef NP_RUNTIME_PRIV_H_
 #define NP_RUNTIME_PRIV_H_
 
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
+#include "npruntime.h"
 
 /*
     NPN_InitializeVariantWithStringCopy() will copy string data.  The string data
@@ -36,6 +34,4 @@
 */
 void NPN_InitializeVariantWithStringCopy(NPVariant*, const NPString*);
 
-#endif // ENABLE(NETSCAPE_API)
 #endif
-

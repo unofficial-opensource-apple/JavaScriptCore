@@ -26,24 +26,29 @@
 #ifndef JNI_CLASS_H_
 #define JNI_CLASS_H_
 
-#if ENABLE(JAVA_BINDINGS)
-
 #include <jni_runtime.h>
-#include <wtf/HashMap.h>
 
 namespace KJS {
 
 namespace Bindings {
 
-class JavaClass : public Class {
+class JavaClass : public Class
+{
 public:
     JavaClass (jobject anInstance);
     ~JavaClass ();
 
     virtual const char *name() const { return _name; };
     
-    virtual MethodList methodsNamed(const Identifier&, Instance* instance) const;    
-    virtual Field *fieldNamed(const Identifier&, Instance* instance) const;
+    virtual MethodList methodsNamed(const char *name, Instance *instance) const;
+    
+    virtual Field *fieldNamed(const char *name, Instance *instance) const;
+    
+    virtual Constructor *constructorAt(int i) const {
+        return &_constructors[i]; 
+    };
+    
+    virtual int numConstructors() const { return _numConstructors; };
     
     bool isNumberClass() const;
     bool isBooleanClass() const;
@@ -51,16 +56,18 @@ public:
     
 private:
     JavaClass ();                                 // prevent default construction
+    JavaClass (const JavaClass &other);           // prevent copying
+    JavaClass &operator=(const JavaClass &other); // prevent copying
     
     const char *_name;
-    FieldMap _fields;
-    MethodListMap _methods;
+    CFDictionaryRef _fields;
+    CFDictionaryRef _methods;
+    JavaConstructor *_constructors;
+    int _numConstructors;
 };
 
 } // namespace Bindings
 
 } // namespace KJS
 
-#endif // ENABLE(JAVA_BINDINGS)
-
-#endif // JNI_CLASS_H_
+#endif

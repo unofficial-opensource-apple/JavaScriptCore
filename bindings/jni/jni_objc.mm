@@ -23,10 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS_JAVA
+
 #include "config.h"
-
-#if ENABLE(JAVA_BINDINGS)
-
 #import <Foundation/Foundation.h>
 #import <JavaScriptCore/jni_utility.h>
 #import <JavaScriptCore/objc_utility.h>
@@ -48,10 +47,6 @@ bool KJS::Bindings::dispatchJNICall (const void *targetAppletView, jobject obj, 
 {
     id view = (id)targetAppletView;
     
-    // As array_type is not known by the Mac JVM, change it to a compatible type.
-    if (returnType == array_type)
-        returnType = object_type;
-    
     if ([view respondsToSelector:@selector(webPlugInCallJava:isStatic:returnType:method:arguments:callingURL:exceptionDescription:)]) {
         NSString *_exceptionDescription = 0;
 
@@ -59,18 +54,13 @@ bool KJS::Bindings::dispatchJNICall (const void *targetAppletView, jobject obj, 
         // of the page that contains the applet. The execution restrictions 
         // implemented in WebCore will guarantee that only appropriate JavaScript
         // can reference the applet.
-        {
-           JSLock::DropAllLocks dropAllLocks;
-            result = [view webPlugInCallJava:obj isStatic:isStatic returnType:returnType method:methodID arguments:args callingURL:nil exceptionDescription:&_exceptionDescription];
-        }
-
+        result = [view webPlugInCallJava:obj isStatic:isStatic returnType:returnType method:methodID arguments:args callingURL:nil exceptionDescription:&_exceptionDescription];
         if (_exceptionDescription != 0) {
             exceptionDescription = convertNSStringToString(_exceptionDescription);
         }
         return true;
     }
     else if ([view respondsToSelector:@selector(webPlugInCallJava:method:returnType:arguments:)]) {
-       JSLock::DropAllLocks dropAllLocks;
         result = [view webPlugInCallJava:obj method:methodID returnType:returnType arguments:args];
         return true;
     }
@@ -79,4 +69,4 @@ bool KJS::Bindings::dispatchJNICall (const void *targetAppletView, jobject obj, 
     return false;
 }
 
-#endif // ENABLE(JAVA_BINDINGS)
+#endif //BINDINGS_JAVA

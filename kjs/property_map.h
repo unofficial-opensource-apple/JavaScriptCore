@@ -1,6 +1,7 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
+// -*- c-basic-offset: 2 -*-
 /*
- *  Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ *  This file is part of the KDE libraries
+ *  Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -23,161 +24,94 @@
 #define KJS_PROPERTY_MAP_H_
 
 #include "identifier.h"
-#include "protect.h"
 #include <wtf/OwnArrayPtr.h>
 
 namespace KJS {
 
+    class PropertyNameArray;
     class JSObject;
     class JSValue;
-    class PropertyNameArray;
     
-    struct PropertyMapEntry;
+    class SavedProperty;
+    
     struct PropertyMapHashTable;
-
-    class SavedProperty : Noncopyable {
+    
+/**
+* Saved Properties
+*/
+    class SavedProperties {
+    friend class PropertyMap;
     public:
-        // Since we use this in arrays, we allocate it uninitialized
-        // and then explicitly initialize. This means we can allocate
-        // the array without initializing every saved property in the
-        // array twice. To accomplish this, the class uses data members
-        // with types that don't have constructors.
-        SavedProperty();
-        void init(UString::Rep* name, JSValue*, unsigned attributes);
-        ~SavedProperty();
-
-        UString::Rep* name() const;
-        JSValue* value() const;
-        unsigned attributes() const;
-
-    private:
-        UString::Rep* m_name;
-        JSValue* m_value;
-        unsigned m_attributes;
-    };
-
-    struct SavedProperties {
         SavedProperties();
         ~SavedProperties();
         
-        unsigned count;
-        OwnArrayPtr<SavedProperty> properties;
+    private:
+        int _count;
+        OwnArrayPtr<SavedProperty> _properties;
+    };
+    
+/**
+* A hashtable entry for the @ref PropertyMap.
+*/
+    struct PropertyMapHashTableEntry
+    {
+        PropertyMapHashTableEntry() : key(0) { }
+        UString::Rep *key;
+        JSValue *value;
+        short attributes;
+        short globalGetterSetterFlag;
+        int index;
     };
 
-    class PropertyMap : Noncopyable {
+/**
+* Javascript Property Map.
+*/
+    class PropertyMap {
     public:
         PropertyMap();
         ~PropertyMap();
-        
+
         void clear();
         
-        void put(const Identifier&, JSValue*, unsigned attributes, bool checkReadOnly = false);
-        void remove(const Identifier&);
-        JSValue* get(const Identifier&) const;
-        JSValue* get(const Identifier&, unsigned& attributes) const;
-        JSValue** getLocation(const Identifier& name);
+        void put(const Identifier &name, JSValue *value, int attributes, bool roCheck = false);
+        void remove(const Identifier &name);
+        JSValue *get(const Identifier &name) const;
+        JSValue *get(const Identifier &name, unsigned &attributes) const;
+        JSValue **getLocation(const Identifier &name);
 
         void mark() const;
         void getEnumerablePropertyNames(PropertyNameArray&) const;
+        void getSparseArrayPropertyNames(PropertyNameArray&) const;
 
-        void save(SavedProperties&) const;
-        void restore(const SavedProperties&);
+        void save(SavedProperties &) const;
+        void restore(const SavedProperties &p);
 
-        bool hasGetterSetterProperties() const { return m_getterSetterFlag; }
-        void setHasGetterSetterProperties(bool f) { m_getterSetterFlag = f; }
+        bool hasGetterSetterProperties() const { return _singleEntry.globalGetterSetterFlag; }
+        void setHasGetterSetterProperties(bool f) { _singleEntry.globalGetterSetterFlag = f; }
 
         bool containsGettersOrSetters() const;
-
     private:
-        typedef PropertyMapEntry Entry;
-        typedef PropertyMapHashTable Table;
-
-        static bool keysMatch(const UString::Rep*, const UString::Rep*);
+        static bool keysMatch(const UString::Rep *, const UString::Rep *);
         void expand();
         void rehash();
-        void rehash(unsigned newTableSize);
-        void createTable();
+        void rehash(int newTableSize);
         
-        void insert(const Entry&);
+        void insert(UString::Rep *, JSValue *value, int attributes, int index);
         
         void checkConsistency();
         
-        UString::Rep* m_singleEntryKey;
-        union {
-            JSValue* singleEntryValue;
-            Table* table;
-        } m_u;
+        typedef PropertyMapHashTableEntry Entry;
+        typedef PropertyMapHashTable Table;
 
-        short m_singleEntryAttributes;
-        bool m_getterSetterFlag : 1;
-        bool m_usingTable : 1;
+        Table *_table;
+        
+        Entry _singleEntry;
     };
 
-    inline PropertyMap::PropertyMap() 
-        : m_singleEntryKey(0)
-        , m_getterSetterFlag(false)
-        , m_usingTable(false)
-
-    {
-    }
-
-    inline SavedProperty::SavedProperty()
-#ifndef NDEBUG
-        : m_name(0)
-        , m_value(0)
-        , m_attributes(0)
-#endif
-    {
-    }
-
-    inline void SavedProperty::init(UString::Rep* name, JSValue* value, unsigned attributes)
-    {
-        ASSERT(name);
-        ASSERT(value);
-
-        ASSERT(!m_name);
-        ASSERT(!m_value);
-        ASSERT(!m_attributes);
-
-        m_name = name;
-        m_value = value;
-        m_attributes = attributes;
-        name->ref();
-        gcProtect(value);
-    }
-
-    inline SavedProperty::~SavedProperty()
-    {
-        ASSERT(m_name);
-        ASSERT(m_value);
-
-        m_name->deref();
-        gcUnprotect(m_value);
-    }
-
-    inline UString::Rep* SavedProperty::name() const
-    {
-        ASSERT(m_name);
-        ASSERT(m_value);
-
-        return m_name;
-    }
-
-    inline JSValue* SavedProperty::value() const
-    {
-        ASSERT(m_name);
-        ASSERT(m_value);
-
-        return m_value;
-    }
-
-    inline unsigned SavedProperty::attributes() const
-    {
-        ASSERT(m_name);
-        ASSERT(m_value);
-
-        return m_attributes;
-    }
+inline PropertyMap::PropertyMap() : _table(0)
+{
+    _singleEntry.globalGetterSetterFlag = 0;
+}
 
 } // namespace
 

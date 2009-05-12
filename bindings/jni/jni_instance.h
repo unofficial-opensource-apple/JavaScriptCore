@@ -26,10 +26,13 @@
 #ifndef _JNI_INSTANCE_H_
 #define _JNI_INSTANCE_H_
 
-#if ENABLE(JAVA_BINDINGS)
+#if BINDINGS_JAVA
+
+#include "config.h"
 
 #include "runtime.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <JavaVM/jni.h>
 
 
@@ -43,7 +46,6 @@ class JObjectWrapper
 {
 friend class RefPtr<JObjectWrapper>;
 friend class JavaArray;
-friend class JavaField;
 friend class JavaInstance;
 friend class JavaMethod;
 
@@ -68,8 +70,9 @@ private:
 class JavaInstance : public Instance
 {
 public:
-    JavaInstance(jobject instance, PassRefPtr<RootObject>);
-    ~JavaInstance();
+    JavaInstance (jobject instance, const RootObject *r);
+        
+    ~JavaInstance ();
     
     virtual Class *getClass() const;
     
@@ -86,10 +89,12 @@ public:
     JSValue *stringValue() const;
     JSValue *numberValue() const;
     JSValue *booleanValue() const;
-
-    virtual BindingLanguage getBindingLanguage() const { return JavaLanguage; }
-
+        
 private:
+    JavaInstance ();                         // prevent default construction
+    JavaInstance (JavaInstance &);           // prevent copying
+    JavaInstance &operator=(JavaInstance &); // prevent copying
+    
     RefPtr<JObjectWrapper> _instance;
     mutable JavaClass *_class;
 };
@@ -98,6 +103,6 @@ private:
 
 } // namespace KJS
 
-#endif // ENABLE(JAVA_BINDINGS)
+#endif //BINDINGS_JAVA
 
-#endif // _JNI_INSTANCE_H_
+#endif

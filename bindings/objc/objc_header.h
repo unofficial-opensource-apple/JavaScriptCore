@@ -23,6 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #ifndef KJS_BINDINGS_OBJC_HEADER_H
 #define KJS_BINDINGS_OBJC_HEADER_H
 
@@ -51,3 +53,5 @@ class NSMethodSignature;
 #endif
 
 #endif
+
+#endif // BINDINGS

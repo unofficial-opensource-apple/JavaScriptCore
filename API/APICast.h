@@ -27,8 +27,8 @@
 #ifndef APICast_h
 #define APICast_h
 
+#include "JSValueRef.h"
 #include "ustring.h"
-#include "ExecState.h"
 
 namespace KJS {
     class ExecState;
@@ -36,13 +36,6 @@ namespace KJS {
     class JSObject;
     class PropertyNameArray;
 }
-
-typedef const struct OpaqueJSContext* JSContextRef;
-typedef struct OpaqueJSContext* JSGlobalContextRef;
-typedef struct OpaqueJSString* JSStringRef;
-typedef struct OpaqueJSPropertyNameAccumulator* JSPropertyNameAccumulatorRef;
-typedef const struct OpaqueJSValue* JSValueRef;
-typedef struct OpaqueJSValue* JSObjectRef;
 
 /* Opaque typing convenience methods */
 
@@ -104,12 +97,6 @@ inline JSObjectRef toRef(const KJS::JSObject* o)
 inline JSContextRef toRef(KJS::ExecState* e)
 {
     return reinterpret_cast<JSContextRef>(e);
-}
-
-inline JSGlobalContextRef toGlobalRef(KJS::ExecState* e)
-{
-    ASSERT(!e->callingExecState());
-    return reinterpret_cast<JSGlobalContextRef>(e);
 }
 
 inline JSPropertyNameAccumulatorRef toRef(KJS::PropertyNameArray* l)

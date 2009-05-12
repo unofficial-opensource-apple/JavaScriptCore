@@ -23,12 +23,12 @@
 #ifndef KJS_UNICODE_H
 #define KJS_UNICODE_H
 
-#include <wtf/Platform.h>
+#include "../Platform.h"
 
 #if USE(QT4_UNICODE)
 #include "qt4/UnicodeQt4.h"
 #elif USE(ICU_UNICODE)
-#include <wtf/unicode/icu/UnicodeIcu.h>
+#include "icu/UnicodeIcu.h"
 #else
 #error "Unknown Unicode implementation"
 #endif

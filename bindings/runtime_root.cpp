@@ -23,56 +23,180 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #include "config.h"
+#include "jni_jsobject.h"
+#include "object.h"
 #include "runtime_root.h"
 
-#include "JSGlobalObject.h"
-#include "object.h"
-#include "runtime.h"
-#include "runtime_object.h"
-#include <wtf/HashCountedSet.h>
-#include <wtf/HashSet.h>
+using namespace KJS;
+using namespace KJS::Bindings;
 
-namespace KJS { namespace Bindings {
+// Java does NOT always call finalize (and thus KJS_JSObject_JSFinalize) when
+// it collects an objects.  This presents some difficulties.  We must ensure
+// the a JavaJSObject's corresponding JavaScript object doesn't get collected.  We
+// do this by incrementing the JavaScript's reference count the first time we
+// create a JavaJSObject for it, and decrementing the JavaScript reference count when
+// the last JavaJSObject that refers to it is finalized, or when the applet is
+// shutdown.
+//
+// To do this we keep a dictionary that maps each applet instance
+// to the JavaScript objects it is referencing.  For each JavaScript instance
+// we also maintain a secondary reference count.  When that reference count reaches
+// 1 OR the applet is shutdown we deref the JavaScript instance.  Applet instances
+// are represented by a jlong.
 
-// This code attempts to solve two problems: (1) plug-ins leaking references to 
-// JS and the DOM; (2) plug-ins holding stale references to JS and the DOM. Previous 
-// comments in this file claimed that problem #1 was an issue in Java, in particular, 
-// because Java, allegedly, didn't always call finalize when collecting an object.
+static CFMutableDictionaryRef referencesByRootDictionary = 0;
 
-typedef HashSet<RootObject*> RootObjectSet;
-
-static RootObjectSet* rootObjectSet()
+static CFMutableDictionaryRef getReferencesByRootDictionary()
 {
-    static RootObjectSet staticRootObjectSet;
-    return &staticRootObjectSet;
+    if (!referencesByRootDictionary)
+        referencesByRootDictionary = CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
+    return referencesByRootDictionary;
 }
 
-// FIXME:  These two functions are a potential performance problem.  We could 
-// fix them by adding a JSObject to RootObject dictionary.
-
-RootObject* findProtectingRootObject(JSObject* jsObject)
+static CFMutableDictionaryRef getReferencesDictionary(const Bindings::RootObject *root)
 {
-    RootObjectSet::const_iterator end = rootObjectSet()->end();
-    for (RootObjectSet::const_iterator it = rootObjectSet()->begin(); it != end; ++it) {
-        if ((*it)->gcIsProtected(jsObject))
-            return *it;
+    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary();
+    CFMutableDictionaryRef referencesDictionary = 0;
+    
+    referencesDictionary = (CFMutableDictionaryRef)CFDictionaryGetValue (refsByRoot, (const void *)root);
+    if (!referencesDictionary) {
+        referencesDictionary = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
+        CFDictionaryAddValue (refsByRoot, root, referencesDictionary);
+        CFRelease (referencesDictionary);
     }
-    return 0;
+    return referencesDictionary;
 }
 
-RootObject* findRootObject(JSGlobalObject* globalObject)
+// Scan all the dictionary for all the roots to see if any have a 
+// reference to the imp, and if so, return it's reference count
+// dictionary.
+// FIXME:  This is a potential performance bottleneck with many applets.  We could fix be adding a
+// imp to root dictionary.
+CFMutableDictionaryRef KJS::Bindings::findReferenceDictionary(JSObject *imp)
 {
-    RootObjectSet::const_iterator end = rootObjectSet()->end();
-    for (RootObjectSet::const_iterator it = rootObjectSet()->begin(); it != end; ++it) {
-        if ((*it)->globalObject() == globalObject)
-            return *it;
+    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary ();
+    CFMutableDictionaryRef foundDictionary = 0;
+    
+    if (refsByRoot) {
+        const void **allValues = 0;
+        CFIndex count, i;
+        
+        count = CFDictionaryGetCount(refsByRoot);
+        allValues = (const void **)malloc (sizeof(void *) * count);
+        CFDictionaryGetKeysAndValues (refsByRoot, NULL, allValues);
+        for(i = 0; i < count; i++) {
+            CFMutableDictionaryRef referencesDictionary = (CFMutableDictionaryRef)allValues[i];
+            if (CFDictionaryGetValue(referencesDictionary, imp) != 0) {
+                foundDictionary = referencesDictionary;
+                break;
+            }
+        }
+        
+        free ((void *)allValues);
     }
-    return 0;
+    return foundDictionary;
+}
+
+// FIXME:  This is a potential performance bottleneck with many applets.  We could fix be adding a
+// imp to root dictionary.
+const Bindings::RootObject *KJS::Bindings::rootForImp (JSObject *imp)
+{
+    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary ();
+    const Bindings::RootObject *rootObject = 0;
+    
+    if (refsByRoot) {
+        const void **allValues = 0;
+        const void **allKeys = 0;
+        CFIndex count, i;
+        
+        count = CFDictionaryGetCount(refsByRoot);
+        allKeys = (const void **)malloc (sizeof(void *) * count);
+        allValues = (const void **)malloc (sizeof(void *) * count);
+        CFDictionaryGetKeysAndValues (refsByRoot, allKeys, allValues);
+        for(i = 0; i < count; i++) {
+            CFMutableDictionaryRef referencesDictionary = (CFMutableDictionaryRef)allValues[i];
+            if (CFDictionaryGetValue(referencesDictionary, imp) != 0) {
+                rootObject = (const Bindings::RootObject *)allKeys[i];
+                break;
+            }
+        }
+        
+        free ((void *)allKeys);
+        free ((void *)allValues);
+    }
+    return rootObject;
+}
+
+const Bindings::RootObject *KJS::Bindings::rootForInterpreter (KJS::Interpreter *interpreter)
+{
+    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary ();
+    const Bindings::RootObject *aRootObject = 0, *result = 0;
+    
+    if (refsByRoot) {
+        const void **allValues = 0;
+        const void **allKeys = 0;
+        CFIndex count, i;
+        
+        count = CFDictionaryGetCount(refsByRoot);
+        allKeys = (const void **)malloc (sizeof(void *) * count);
+        allValues = (const void **)malloc (sizeof(void *) * count);
+        CFDictionaryGetKeysAndValues (refsByRoot, allKeys, allValues);
+        for(i = 0; i < count; i++) {
+            aRootObject = (const Bindings::RootObject *)allKeys[i];
+            if (aRootObject->interpreter() == interpreter) {
+                result = aRootObject;
+                break;
+            }
+        }
+        
+        free ((void *)allKeys);
+        free ((void *)allValues);
+    }
+    return result;
+}
+
+void KJS::Bindings::addNativeReference (const Bindings::RootObject *root, JSObject *imp)
+{
+    if (root) {
+        CFMutableDictionaryRef referencesDictionary = getReferencesDictionary (root);
+        
+        unsigned long numReferences = (unsigned long)CFDictionaryGetValue (referencesDictionary, imp);
+        if (numReferences == 0) {
+            JSLock lock;
+            gcProtect(imp);
+            CFDictionaryAddValue (referencesDictionary, imp,  (const void *)1);
+        }
+        else {
+            CFDictionaryReplaceValue (referencesDictionary, imp, (const void *)(numReferences+1));
+        }
+    }
+}
+
+void KJS::Bindings::removeNativeReference (JSObject *imp)
+{
+    if (!imp)
+        return;
+
+    CFMutableDictionaryRef referencesDictionary = findReferenceDictionary (imp);
+
+    if (referencesDictionary) {
+        unsigned long numReferences = (unsigned long)CFDictionaryGetValue (referencesDictionary, imp);
+        if (numReferences == 1) {
+            JSLock lock;
+            gcUnprotect(imp);
+            CFDictionaryRemoveValue (referencesDictionary, imp);
+        }
+        else {
+            CFDictionaryReplaceValue (referencesDictionary, imp, (const void *)(numReferences-1));
+        }
+    }
 }
 
 // May only be set by dispatchToJavaScriptThread().
-#if ENABLE(JAVA_BINDINGS)
+#if BINDINGS_JAVA
 static CFRunLoopSourceRef completionSource;
 
 static void completedJavaScriptAccess (void *i)
@@ -171,18 +295,17 @@ static void performJavaScriptAccess(void*)
         CFRunLoopWakeUp(originatingLoop);
     }
 }
-#endif // ENABLE(JAVA_BINDINGS)
-
-CreateRootObjectFunction RootObject::_createRootObject = 0;
+#endif
+FindRootObjectForNativeHandleFunctionPtr RootObject::_findRootObjectForNativeHandleFunctionPtr = 0;
 CFRunLoopRef RootObject::_runLoop = 0;
 CFRunLoopSourceRef RootObject::_performJavaScriptSource = 0;
 
 // Must be called from the thread that will be used to access JavaScript.
-void RootObject::setCreateRootObject(CreateRootObjectFunction createRootObject) {
+void RootObject::setFindRootObjectForNativeHandleFunction(FindRootObjectForNativeHandleFunctionPtr aFunc) {
     // Should only be called once.
-    ASSERT(!_createRootObject);
+    assert (_findRootObjectForNativeHandleFunctionPtr == 0);
 
-    _createRootObject = createRootObject;
+    _findRootObjectForNativeHandleFunctionPtr = aFunc;
     
     // Assume that we can retain this run loop forever.  It'll most 
     // likely (always?) be the main loop.
@@ -191,119 +314,42 @@ void RootObject::setCreateRootObject(CreateRootObjectFunction createRootObject) 
     // Setup a source the other threads can use to signal the _runLoop
     // thread that a JavaScript call needs to be invoked.
 
-#if ENABLE(JAVA_BINDINGS)
+#if BINDINGS_JAVA    
     CFRunLoopSourceContext sourceContext = {0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, performJavaScriptAccess};
-    RootObject::_performJavaScriptSource = CFRunLoopSourceCreate(NULL, 0, &sourceContext);
-    CFRunLoopAddSource(RootObject::_runLoop, RootObject::_performJavaScriptSource, kCFRunLoopDefaultMode);
-#endif // ENABLE(JAVA_BINDINGS)
+    Bindings::RootObject::_performJavaScriptSource = CFRunLoopSourceCreate(NULL, 0, &sourceContext);
+    CFRunLoopAddSource(Bindings::RootObject::_runLoop, Bindings::RootObject::_performJavaScriptSource, kCFRunLoopDefaultMode);
+#endif
 }
 
-
-PassRefPtr<RootObject> RootObject::create(const void* nativeHandle, JSGlobalObject* globalObject)
+// Must be called when the applet is shutdown.
+void RootObject::removeAllNativeReferences ()
 {
-    return new RootObject(nativeHandle, globalObject);
-}
-
-RootObject::RootObject(const void* nativeHandle, JSGlobalObject* globalObject)
-    : m_isValid(true)
-    , m_nativeHandle(nativeHandle)
-    , m_globalObject(globalObject)
-{
-    ASSERT(globalObject);
-    rootObjectSet()->add(this);
-}
-
-RootObject::~RootObject()
-{
-    if (m_isValid)
-        invalidate();
-}
-
-void RootObject::invalidate()
-{
-    if (!m_isValid)
-        return;
-
-    {
-        HashSet<RuntimeObjectImp*>::iterator end = m_runtimeObjects.end();
-        for (HashSet<RuntimeObjectImp*>::iterator it = m_runtimeObjects.begin(); it != end; ++it)
-            (*it)->invalidate();
+    CFMutableDictionaryRef referencesDictionary = getReferencesDictionary (this);
+    
+    if (referencesDictionary) {
+        void **allImps = 0;
+        CFIndex count, i;
         
-        m_runtimeObjects.clear();
+        count = CFDictionaryGetCount(referencesDictionary);
+        allImps = (void **)malloc (sizeof(void *) * count);
+        CFDictionaryGetKeysAndValues (referencesDictionary, (const void **)allImps, NULL);
+        for(i = 0; i < count; i++) {
+            JSLock lock;
+            JSObject *anImp = static_cast<JSObject*>(allImps[i]);
+            gcUnprotect(anImp);
+        }
+        free ((void *)allImps);
+        CFDictionaryRemoveAllValues (referencesDictionary);
+
+        CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary();
+        CFDictionaryRemoveValue (refsByRoot, (const void *)this);
+        delete this;
     }
-    
-    m_isValid = false;
-
-    m_nativeHandle = 0;
-    m_globalObject = 0;
-
-    ProtectCountSet::iterator end = m_protectCountSet.end();
-    for (ProtectCountSet::iterator it = m_protectCountSet.begin(); it != end; ++it) {
-        JSLock lock;
-        KJS::gcUnprotect(it->first);
-    }
-    m_protectCountSet.clear();
-
-    rootObjectSet()->remove(this);
 }
 
-void RootObject::gcProtect(JSObject* jsObject)
+void RootObject::setInterpreter (KJS::Interpreter *i)
 {
-    ASSERT(m_isValid);
-    
-    if (!m_protectCountSet.contains(jsObject)) {
-        JSLock lock;
-        KJS::gcProtect(jsObject);
-    }
-    m_protectCountSet.add(jsObject);
+    _interpreter = i;
 }
 
-void RootObject::gcUnprotect(JSObject* jsObject)
-{
-    ASSERT(m_isValid);
-    
-    if (!jsObject)
-        return;
-
-    if (m_protectCountSet.count(jsObject) == 1) {
-        JSLock lock;
-        KJS::gcUnprotect(jsObject);
-    }
-    m_protectCountSet.remove(jsObject);
-}
-
-bool RootObject::gcIsProtected(JSObject* jsObject)
-{
-    ASSERT(m_isValid);
-    return m_protectCountSet.contains(jsObject);
-}
-
-const void* RootObject::nativeHandle() const 
-{ 
-    ASSERT(m_isValid);
-    return m_nativeHandle; 
-}
-
-JSGlobalObject* RootObject::globalObject() const
-{
-    ASSERT(m_isValid);
-    return m_globalObject;
-}
-
-void RootObject::addRuntimeObject(RuntimeObjectImp* object)
-{
-    ASSERT(m_isValid);
-    ASSERT(!m_runtimeObjects.contains(object));
-    
-    m_runtimeObjects.add(object);
-}        
-    
-void RootObject::removeRuntimeObject(RuntimeObjectImp* object)
-{
-    ASSERT(m_isValid);
-    ASSERT(m_runtimeObjects.contains(object));
-    
-    m_runtimeObjects.remove(object);
-}
-
-} } // namespace KJS::Bindings
+#endif //BINDINGS

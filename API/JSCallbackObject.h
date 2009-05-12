@@ -1,7 +1,6 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2007 Eric Seidel <eric@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,14 +33,12 @@
 
 namespace KJS {
 
-template <class Base>
-class JSCallbackObject : public Base
+class JSCallbackObject : public JSObject
 {
 public:
     JSCallbackObject(ExecState*, JSClassRef, JSValue* prototype, void* data);
-    JSCallbackObject(JSClassRef);
     virtual ~JSCallbackObject();
-
+        
     virtual UString className() const;
 
     virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
@@ -76,7 +73,10 @@ public:
     bool inherits(JSClassRef) const;
     
 private:
-    void init(ExecState*);
+    JSCallbackObject(); // prevent default construction
+    JSCallbackObject(const JSCallbackObject&);
+
+    void init(ExecState*, JSClassRef jsClass, void*);
     
     static JSValue* cachedValueGetter(ExecState*, JSObject*, const Identifier&, const PropertySlot&);
     static JSValue* staticValueGetter(ExecState*, JSObject*, const Identifier&, const PropertySlot& slot);
@@ -88,8 +88,5 @@ private:
 };
 
 } // namespace KJS
-
-// include the actual template class implementation
-#include "JSCallbackObjectFunctions.h"
 
 #endif // JSCallbackObject_h

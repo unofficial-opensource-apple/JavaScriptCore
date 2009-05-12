@@ -23,20 +23,25 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
  
+#if BINDINGS
+
 #include "config.h"
 #include "runtime_method.h"
 
-#include "ExecState.h"
-#include "JSGlobalObject.h"
+#include "context.h"
 #include "runtime_object.h"
-#include "function_object.h"
 
 using namespace KJS::Bindings;
 using namespace KJS;
 
+// FIXME: this should probably use InternalFunctionImp, not FunctionImp
 RuntimeMethod::RuntimeMethod(ExecState *exec, const Identifier &ident, Bindings::MethodList &m) 
-    : InternalFunctionImp(exec->lexicalGlobalObject()->functionPrototype(), ident)
-    , _methodList(new MethodList(m))
+    : FunctionImp (exec, ident, 0)
+{
+    _methodList = m;
+}
+
+RuntimeMethod::~RuntimeMethod()
 {
 }
 
@@ -50,45 +55,58 @@ JSValue *RuntimeMethod::lengthGetter(ExecState*, JSObject*, const Identifier&, c
     // Java does.
     // FIXME: a better solution might be to give the maximum number of parameters
     // of any method
-    return jsNumber(thisObj->_methodList->at(0)->numParameters());
+    return jsNumber(thisObj->_methodList.methodAt(0)->numParameters());
 }
 
-bool RuntimeMethod::getOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot &slot)
+bool RuntimeMethod::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot &slot)
 {
-    if (propertyName == exec->propertyNames().length) {
+    if (propertyName == lengthPropertyName) {
         slot.setCustom(this, lengthGetter);
         return true;
     }
     
-    return InternalFunctionImp::getOwnPropertySlot(exec, propertyName, slot);
+    return FunctionImp::getOwnPropertySlot(exec, propertyName, slot);
 }
 
 JSValue *RuntimeMethod::callAsFunction(ExecState *exec, JSObject *thisObj, const List &args)
 {
-    if (_methodList->isEmpty())
-        return jsUndefined();
-    
-    RuntimeObjectImp *imp = 0;
-
-    if (thisObj->classInfo() == &KJS::RuntimeObjectImp::info) {
-        imp = static_cast<RuntimeObjectImp*>(thisObj);
-    } else {
-        // If thisObj is the DOM object for a plugin, get the corresponding
-        // runtime object from the DOM object.
-        JSValue* value = thisObj->get(exec, "__apple_runtime_object");
-        if (value->isObject(&KJS::RuntimeObjectImp::info))    
-            imp = static_cast<RuntimeObjectImp*>(value);
+    if (_methodList.length() > 0) {
+	RuntimeObjectImp *imp;
+	
+	// If thisObj is the DOM object for a plugin, get the corresponding
+	// runtime object from the DOM object.
+	if (thisObj->classInfo() != &KJS::RuntimeObjectImp::info) {
+	    JSValue *runtimeObject = thisObj->get(exec, "__apple_runtime_object");
+	    imp = static_cast<RuntimeObjectImp*>(runtimeObject);
+	}
+	else {
+	    imp = static_cast<RuntimeObjectImp*>(thisObj);
+	}
+        if (imp) {
+            Instance *instance = imp->getInternalInstance();
+            
+            instance->begin();
+            
+            JSValue *aValue = instance->invokeMethod(exec, _methodList, args);
+            
+            instance->end();
+            
+            return aValue;
+        }
     }
-
-    if (!imp)
-        return throwError(exec, TypeError);
-
-    RefPtr<Instance> instance = imp->getInternalInstance();
-    if (!instance) 
-        return RuntimeObjectImp::throwInvalidAccessError(exec);
-        
-    instance->begin();
-    JSValue *aValue = instance->invokeMethod(exec, *_methodList, args);
-    instance->end();
-    return aValue;
+    
+    return jsUndefined();
 }
+
+CodeType RuntimeMethod::codeType() const
+{
+    return FunctionCode;
+}
+
+
+Completion RuntimeMethod::execute(ExecState*)
+{
+    return Completion(Normal, jsUndefined());
+}
+
+#endif //BINDINGS

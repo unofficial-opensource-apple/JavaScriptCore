@@ -26,9 +26,9 @@
 #ifndef _NP_RUNTIME_IMPL_H_
 #define _NP_RUNTIME_IMPL_H_
 
-#if ENABLE(NETSCAPE_API)
+#if NETSCAPE_API
 
-#include "npruntime_internal.h"
+#include "npruntime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,12 +54,11 @@ extern bool _NPN_RemoveProperty(NPP npp, NPObject *npobj, NPIdentifier propertyN
 extern bool _NPN_HasProperty(NPP npp, NPObject *npobj, NPIdentifier propertyName);
 extern bool _NPN_HasMethod(NPP npp, NPObject *npobj, NPIdentifier methodName);
 extern void _NPN_SetException(NPObject *obj, const NPUTF8 *message);
-extern bool _NPN_Enumerate(NPP npp, NPObject *npobj, NPIdentifier **identifier, uint32_t *count);
 
 #ifdef __cplusplus
 }  /* end extern "C" */
 #endif
 
-#endif // ENABLE(NETSCAPE_API)
+#endif // NETSCAPE_API
 
 #endif

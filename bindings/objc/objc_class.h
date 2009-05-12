@@ -23,6 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #ifndef KJS_BINDINGS_OBJC_CLASS_H
 #define KJS_BINDINGS_OBJC_CLASS_H
 
@@ -37,25 +39,35 @@ protected:
     ObjcClass (ClassStructPtr aClass); // Use classForIsA to create an ObjcClass.
     
 public:
+    ~ObjcClass();
+
     // Return the cached ObjC of the specified name.
     static ObjcClass *classForIsA(ClassStructPtr);
     
     virtual const char *name() const;
     
-    virtual MethodList methodsNamed(const Identifier&, Instance *instance) const;
-    virtual Field *fieldNamed(const Identifier&, Instance *instance) const;
+    virtual MethodList methodsNamed(const char *name, Instance *instance) const;
+    virtual Field *fieldNamed(const char *name, Instance *instance) const;
 
     virtual JSValue *fallbackObject(ExecState *exec, Instance *instance, const Identifier &propertyName);
+    
+    virtual Constructor *constructorAt(int) const { return 0; }
+    virtual int numConstructors() const { return 0; }
     
     ClassStructPtr isa() { return _isa; }
     
 private:
+    ObjcClass(const ObjcClass &other); // prohibit copying
+    ObjcClass &operator=(const ObjcClass &other); // ditto
+    
     ClassStructPtr _isa;
-    RetainPtr<CFMutableDictionaryRef> _methods;
-    RetainPtr<CFMutableDictionaryRef> _fields;
+    CFMutableDictionaryRef _methods;
+    CFMutableDictionaryRef _fields;
 };
 
 } // namespace Bindings
 } // namespace KJS
 
 #endif
+
+#endif // BINDINGS

@@ -2,7 +2,6 @@
 /*
  *  This file is part of the KDE libraries
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2007 Apple Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -21,24 +20,29 @@
  *
  */
 
-#ifndef Lexer_h
-#define Lexer_h
+#ifndef _KJSLEXER_H_
+#define _KJSLEXER_H_
 
-#include "SourceCode.h"
 #include "ustring.h"
-#include <wtf/Vector.h>
+
 
 namespace KJS {
 
   class Identifier;
+
   class RegExp;
 
-  class Lexer : Noncopyable {
+  class Lexer {
   public:
-    void setCode(const SourceCode&);
+    Lexer();
+    ~Lexer();
+    static Lexer *curr();
+
+    void setCode(const UString &sourceURL, int startingLineNumber, const UChar *c, unsigned int len);
     int lex();
 
     int lineNo() const { return yylineno; }
+    UString sourceURL() const { return m_sourceURL; }
 
     bool prevTerminator() const { return terminator; }
 
@@ -47,10 +51,8 @@ namespace KJS {
                  Identifier,
                  InIdentifierOrKeyword,
                  InIdentifier,
-                 InIdentifierStartUnicodeEscapeStart,
-                 InIdentifierStartUnicodeEscape,
-                 InIdentifierPartUnicodeEscapeStart,
-                 InIdentifierPartUnicodeEscape,
+                 InIdentifierUnicodeEscapeStart,
+                 InIdentifierUnicodeEscape,
                  InSingleLineComment,
                  InMultiLineComment,
                  InNum,
@@ -73,35 +75,16 @@ namespace KJS {
                  Bad };
 
     bool scanRegExp();
-    const UString& pattern() const { return m_pattern; }
-    const UString& flags() const { return m_flags; }
-
-    static unsigned char convertHex(int);
-    static unsigned char convertHex(int c1, int c2);
-    static UChar convertUnicode(int c1, int c2, int c3, int c4);
-    static bool isIdentStart(int);
-    static bool isIdentPart(int);
-    static bool isHexDigit(int);
-
-    bool sawError() const { return error; }
-
-    void clear();
-    SourceCode sourceCode(int openBrace, int closeBrace, int firstLine)
-    {
-        // The SourceCode constructor adds 1 to the line number to account for
-        // all of the callers in WebCore that use zero-based line numbers, so
-        // we regrettably subtract 1 here to deal with that.
-        return SourceCode(m_source->provider(), m_source->startOffset() + openBrace + 1, m_source->startOffset() + closeBrace, firstLine - 1);
-    }
+    UString pattern, flags;
 
   private:
-    friend Lexer& lexer();
-    Lexer();
-
     int yylineno;
+    UString m_sourceURL;
     bool done;
-    Vector<char> m_buffer8;
-    Vector<UChar> m_buffer16;
+    char *buffer8;
+    UChar *buffer16;
+    unsigned int size8, size16;
+    unsigned int pos8, pos16;
     bool terminator;
     bool restrKeyword;
     // encountered delimiter like "'" and "}" on last run
@@ -113,7 +96,7 @@ namespace KJS {
     int lastToken;
 
     State state;
-    void setDone(State);
+    void setDone(State s);
     unsigned int pos;
     void shift(unsigned int p);
     void nextLine();
@@ -121,43 +104,65 @@ namespace KJS {
 
     bool isWhiteSpace() const;
     bool isLineTerminator();
-    static bool isOctalDigit(int);
+    bool isOctalDigit(unsigned short c) const;
 
-    int matchPunctuator(int& charPos, int c1, int c2, int c3, int c4);
-    static unsigned short singleEscape(unsigned short);
-    static unsigned short convertOctal(int c1, int c2, int c3);
+    int matchPunctuator(unsigned short c1, unsigned short c2,
+                        unsigned short c3, unsigned short c4);
+    unsigned short singleEscape(unsigned short c) const;
+    unsigned short convertOctal(unsigned short c1, unsigned short c2,
+                                unsigned short c3) const;
+  public:
+    static unsigned char convertHex(unsigned short c1);
+    static unsigned char convertHex(unsigned short c1, unsigned short c2);
+    static UChar convertUnicode(unsigned short c1, unsigned short c2,
+                                unsigned short c3, unsigned short c4);
+    static bool isIdentStart(unsigned short c);
+    static bool isIdentPart(unsigned short c);
+    static bool isHexDigit(unsigned short c);
 
-    void record8(int);
-    void record16(int);
-    void record16(UChar);
+#ifdef KJS_DEBUG_MEM
+    /**
+     * Clear statically allocated resources
+     */
+    static void globalClear();
+#endif
 
-    KJS::Identifier* makeIdentifier(const Vector<UChar>& buffer);
-    UString* makeUString(const Vector<UChar>& buffer);
+    bool sawError() const { return error; }
+    void doneParsing();
 
-    const SourceCode* m_source;
-    const UChar* code;
+  private:
+
+    void record8(unsigned short c);
+    void record16(int c);
+    void record16(UChar c);
+
+    KJS::Identifier *makeIdentifier(UChar *buffer, unsigned int pos);
+    UString *makeUString(UChar *buffer, unsigned int pos);
+
+    const UChar *code;
     unsigned int length;
     int yycolumn;
-    int atLineStart;
+#ifndef KJS_PURE_ECMA
+    int bol;     // begin of line
+#endif
     bool error;
 
     // current and following unicode characters (int to allow for -1 for end-of-file marker)
     int current, next1, next2, next3;
 
-    int m_currentOffset;
-    int m_nextOffset1;
-    int m_nextOffset2;
-    int m_nextOffset3;
+    UString **strings;
+    unsigned int numStrings;
+    unsigned int stringsCapacity;
 
-    Vector<UString*> m_strings;
-    Vector<KJS::Identifier*> m_identifiers;
-    
-    UString m_pattern;
-    UString m_flags;
+    KJS::Identifier **identifiers;
+    unsigned int numIdentifiers;
+    unsigned int identifiersCapacity;
+
+    // for future extensions
+    class LexerPrivate;
+    LexerPrivate *priv;
   };
-  
-  Lexer& lexer(); // Returns the singletone JavaScript lexer.
 
-} // namespace KJS
+} // namespace
 
-#endif // Lexer_h
+#endif

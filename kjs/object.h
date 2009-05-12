@@ -25,21 +25,20 @@
 #ifndef KJS_OBJECT_H
 #define KJS_OBJECT_H
 
-#include "CommonIdentifiers.h"
-#include "ExecState.h"
 #include "JSType.h"
-#include "list.h"
+#include "interpreter.h"
 #include "property_map.h"
 #include "property_slot.h"
 #include "scope_chain.h"
+#include <wtf/AlwaysInline.h>
 
 namespace KJS {
 
+  class HashTable;
+  class HashEntry;
+  class ListImp;
   class InternalFunctionImp;
   class PropertyNameArray;
-
-  struct HashEntry;
-  struct HashTable;
 
   // ECMA 262-3 8.6.1
   // Property attributes
@@ -63,11 +62,15 @@ namespace KJS {
      * Pointer to the class information of the base class.
      * 0L if there is none.
      */
-    const ClassInfo* parentClass;
+    const ClassInfo *parentClass;
     /**
      * Static hash-table of properties.
      */
-    const HashTable* propHashTable;
+    const HashTable *propHashTable;
+    /**
+     * Reserved for future extension.
+     */
+    void *dummy;
   };
   
   // This is an internal value object which stores getter and setter functions
@@ -78,8 +81,7 @@ namespace KJS {
       
     GetterSetterImp() : getter(0), setter(0) { }
       
-    virtual JSValue* toPrimitive(ExecState*, JSType preferred = UnspecifiedType) const;
-    virtual bool getPrimitiveNumber(ExecState*, double& number, JSValue*& value);
+    virtual JSValue *toPrimitive(ExecState *exec, JSType preferred = UnspecifiedType) const;
     virtual bool toBoolean(ExecState *exec) const;
     virtual double toNumber(ExecState *exec) const;
     virtual UString toString(ExecState *exec) const;
@@ -104,14 +106,14 @@ namespace KJS {
      *
      * @param proto The prototype
      */
-    JSObject(JSValue* proto);
+    JSObject(JSValue* proto, bool destructorIsThreadSafe = true);
 
     /**
      * Creates a new JSObject with a prototype of jsNull()
      * (that is, the ECMAScript "null" value, not a null object pointer).
      */
-    JSObject();
-    
+    explicit JSObject(bool destructorIsThreadSafe = true);
+
     virtual void mark();
     virtual JSType type() const;
 
@@ -146,8 +148,8 @@ namespace KJS {
      * And in your source file:
      *
      * \code
-     *   const ClassInfo BarImp::info = { "Bar", 0, 0 }; // no parent class
-     *   const ClassInfo FooImp::info = { "Foo", &BarImp::info, 0 };
+     *   const ClassInfo BarImp::info = {"Bar", 0, 0, 0}; // no parent class
+     *   const ClassInfo FooImp::info = {"Foo", &BarImp::info, 0, 0};
      * \endcode
      *
      * @see inherits()
@@ -243,8 +245,8 @@ namespace KJS {
      * @param propertyName The name of the property to set
      * @param propertyValue The value to set
      */
-    virtual void put(ExecState* exec, const Identifier &propertyName, JSValue* value, int attr = None);
-    virtual void put(ExecState* exec, unsigned propertyName, JSValue* value, int attr = None);
+    virtual void put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr = None);
+    virtual void put(ExecState *exec, unsigned propertyName, JSValue *value, int attr = None);
 
     /**
      * Used to check whether or not a particular property is allowed to be set
@@ -283,9 +285,8 @@ namespace KJS {
      * @param propertyName The name of the property to check for
      * @return true if the object has the property, otherwise false
      */
-    bool hasProperty(ExecState*, const Identifier&) const;
-    bool hasProperty(ExecState*, unsigned) const;
-    bool hasOwnProperty(ExecState*, const Identifier&) const;
+    bool hasProperty(ExecState *exec, const Identifier &propertyName) const;
+    bool hasProperty(ExecState *exec, unsigned propertyName) const;
 
     /**
      * Removes the specified property from the object.
@@ -411,10 +412,57 @@ namespace KJS {
      */
     virtual bool hasInstance(ExecState *exec, JSValue *value);
 
+    /**
+     * Returns the scope of this object. This is used when execution declared
+     * functions - the execution context for the function is initialized with
+     * extra object in it's scope. An example of this is functions declared
+     * inside other functions:
+     *
+     * \code
+     * function f() {
+     *
+     *   function b() {
+     *     return prototype;
+     *   }
+     *
+     *   var x = 4;
+     *   // do some stuff
+     * }
+     * f.prototype = new String();
+     * \endcode
+     *
+     * When the function f.b is executed, its scope will include properties of
+     * f. So in the example above the return value of f.b() would be the new
+     * String object that was assigned to f.prototype.
+     *
+     * @param exec The current execution state
+     * @return The function's scope
+     */
+    const ScopeChain &scope() const { return _scope; }
+    void setScope(const ScopeChain &s) { _scope = s; }
+
     virtual void getPropertyNames(ExecState*, PropertyNameArray&);
 
-    virtual JSValue* toPrimitive(ExecState*, JSType preferredType = UnspecifiedType) const;
-    virtual bool getPrimitiveNumber(ExecState*, double& number, JSValue*& value);
+    /**
+     * Returns the internal value of the object. This is used for objects such
+     * as String and Boolean which are wrappers for native types. The interal
+     * value is the actual value represented by the wrapper objects.
+     *
+     * @see ECMA 8.6.2
+     * @return The internal value of the object
+     */
+    JSValue *internalValue() const;
+
+    /**
+     * Sets the internal value of the object
+     *
+     * @see internalValue()
+     *
+     * @param v The new internal value
+     */
+    void setInternalValue(JSValue *v);
+
+    virtual JSValue *toPrimitive(ExecState *exec, JSType preferredType = UnspecifiedType) const;
     virtual bool toBoolean(ExecState *exec) const;
     virtual double toNumber(ExecState *exec) const;
     virtual UString toString(ExecState *exec) const;
@@ -434,8 +482,7 @@ namespace KJS {
         { return _prop.getLocation(propertyName); }
     void putDirect(const Identifier &propertyName, JSValue *value, int attr = 0);
     void putDirect(const Identifier &propertyName, int value, int attr = 0);
-    void removeDirect(const Identifier &propertyName);
-    
+
     // convenience to add a function property under the function's own built-in name
     void putDirectFunction(InternalFunctionImp*, int attr = 0);
 
@@ -444,18 +491,24 @@ namespace KJS {
     void defineGetter(ExecState *exec, const Identifier& propertyName, JSObject *getterFunc);
     void defineSetter(ExecState *exec, const Identifier& propertyName, JSObject *setterFunc);
 
+    /**
+     * Remove all properties from this object.
+     * This doesn't take DontDelete into account, and isn't in the ECMA spec.
+     * It's simply a quick way to remove everything stored in the property map.
+     */
+    void clearProperties() { _prop.clear(); }
+
     void saveProperties(SavedProperties &p) const { _prop.save(p); }
     void restoreProperties(const SavedProperties &p) { _prop.restore(p); }
 
-    virtual bool isActivationObject() { return false; }
-    virtual bool isGlobalObject() const { return false; }
-
+    virtual bool isActivation() { return false; }
   protected:
     PropertyMap _prop;
-
   private:
     const HashEntry* findPropertyHashEntry( const Identifier& propertyName ) const;
     JSValue *_proto;
+    JSValue *_internalValue;
+    ScopeChain _scope;
   };
 
   /**
@@ -487,7 +540,7 @@ namespace KJS {
      * @param sourceId Optional source id.
      * @param sourceURL Optional source URL.
      */
-    static JSObject *create(ExecState *, ErrorType, const UString &message, int lineNumber, intptr_t sourceID, const UString &sourceURL);
+    static JSObject *create(ExecState *, ErrorType, const UString &message, int lineNumber, int sourceId, const UString &sourceURL);
     static JSObject *create(ExecState *, ErrorType, const char *message);
 
     /**
@@ -496,20 +549,34 @@ namespace KJS {
     static const char * const * const errorNames;
   };
 
-JSObject *throwError(ExecState *, ErrorType, const UString &message, int lineNumber, intptr_t sourceID, const UString &sourceURL);
+JSObject *throwError(ExecState *, ErrorType, const UString &message, int lineNumber, int sourceId, const UString &sourceURL);
 JSObject *throwError(ExecState *, ErrorType, const UString &message);
 JSObject *throwError(ExecState *, ErrorType, const char *message);
 JSObject *throwError(ExecState *, ErrorType);
 
-inline JSObject::JSObject(JSValue* proto)
-    : _proto(proto)
+inline JSObject::JSObject(JSValue* proto, bool destructorIsThreadSafe)
+    : JSCell(destructorIsThreadSafe)
+    , _proto(proto)
+    , _internalValue(0)
 {
-    ASSERT(proto);
+    assert(proto);
 }
 
-inline JSObject::JSObject()
-    : _proto(jsNull())
+inline JSObject::JSObject(bool destructorIsThreadSafe)
+    : JSCell(destructorIsThreadSafe)
+    , _proto(jsNull())
+    , _internalValue(0)
 {
+}
+
+inline JSValue *JSObject::internalValue() const
+{
+    return _internalValue;
+}
+
+inline void JSObject::setInternalValue(JSValue *v)
+{
+    _internalValue = v;
 }
 
 inline JSValue *JSObject::prototype() const
@@ -519,7 +586,7 @@ inline JSValue *JSObject::prototype() const
 
 inline void JSObject::setPrototype(JSValue *proto)
 {
-    ASSERT(proto);
+    assert(proto);
     _proto = proto;
 }
 
@@ -540,7 +607,7 @@ inline bool JSCell::isObject(const ClassInfo *info) const
 // this method is here to be after the inline declaration of JSCell::isObject
 inline bool JSValue::isObject(const ClassInfo *c) const
 {
-    return !JSImmediate::isImmediate(this) && asCell()->isObject(c);
+    return !JSImmediate::isImmediate(this) && downcast()->isObject(c);
 }
 
 // It may seem crazy to inline a function this large but it makes a big difference
@@ -563,7 +630,7 @@ inline bool JSObject::getPropertySlot(ExecState *exec, const Identifier& propert
 // It may seem crazy to inline a function this large, especially a virtual function,
 // but it makes a big difference to property lookup that derived classes can inline their
 // base class call to this.
-ALWAYS_INLINE bool JSObject::getOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
+ALWAYS_INLINE bool JSObject::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot& slot)
 {
     if (JSValue **location = getDirectLocation(propertyName)) {
         if (_prop.hasGetterSetterProperties() && location[0]->type() == GetterSetterType)
@@ -574,7 +641,7 @@ ALWAYS_INLINE bool JSObject::getOwnPropertySlot(ExecState* exec, const Identifie
     }
 
     // non-standard Netscape extension
-    if (propertyName == exec->propertyNames().underscoreProto) {
+    if (propertyName == exec->dynamicInterpreter()->specialPrototypeIdentifier()) {
         slot.setValueSlot(this, &_proto);
         return true;
     }
@@ -582,11 +649,22 @@ ALWAYS_INLINE bool JSObject::getOwnPropertySlot(ExecState* exec, const Identifie
     return false;
 }
 
+// FIXME: Put this function in a separate file named something like scope_chain_mark.h -- can't put it in scope_chain.h since it depends on JSObject.
+
+inline void ScopeChain::mark()
+{
+    for (ScopeChainNode *n = _node; n; n = n->next) {
+        JSObject *o = n->object;
+        if (!o->marked())
+            o->mark();
+    }
+}
+
 inline void ScopeChain::release()
 {
     // This function is only called by deref(),
     // Deref ensures these conditions are true.
-    ASSERT(_node && _node->refCount == 0);
+    assert(_node && _node->refCount == 0);
     ScopeChainNode *n = _node;
     do {
         ScopeChainNode *next = n->next;

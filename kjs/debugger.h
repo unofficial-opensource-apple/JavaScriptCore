@@ -23,17 +23,12 @@
 #ifndef _KJSDEBUGGER_H_
 #define _KJSDEBUGGER_H_
 
-#include <wtf/HashMap.h>
-#include "protect.h"
-
 namespace KJS {
 
   class DebuggerImp;
+  class Interpreter;
   class ExecState;
-  class JSGlobalObject;
   class JSObject;
-  class JSValue;
-  class SourceCode;
   class UString;
   class List;
 
@@ -59,7 +54,7 @@ namespace KJS {
     Debugger();
 
     /**
-     * Destroys the debugger. If the debugger is attached to any global objects,
+     * Destroys the debugger. If the debugger is attached to any interpreters,
      * it is automatically detached.
      */
     virtual ~Debugger();
@@ -67,30 +62,31 @@ namespace KJS {
     DebuggerImp *imp() const { return rep; }
 
     /**
-     * Attaches the debugger to specified global object. This will cause this
-     * object to receive notification of events during execution.
+     * Attaches the debugger to specified interpreter. This will cause this
+     * object to receive notification of events from the interpreter.
      *
-     * If the global object is deleted, it will detach the debugger.
+     * If the interpreter is deleted, the debugger will automatically be
+     * detached.
      *
-     * Note: only one debugger can be attached to a global object at a time.
-     * Attaching another debugger to the same global object will cause the
-     * original debugger to be detached.
+     * Note: only one debugger can be attached to an interpreter at a time.
+     * Attaching another debugger to the same interpreter will cause the
+     * original debugger to be detached from that interpreter.
      *
-     * @param The global object to attach to.
+     * @param interp The interpreter to attach to
      *
      * @see detach()
      */
-    void attach(JSGlobalObject*);
+    void attach(Interpreter *interp);
 
     /**
-     * Detach the debugger from a global object.
+     * Detach the debugger from an interpreter
      *
-     * @param The global object to detach from. If 0, the debugger will be
-     * detached from all global objects to which it is attached.
+     * @param interp The interpreter to detach from. If 0, the debugger will be
+     * detached from all interpreters to which it is attached.
      *
      * @see attach()
      */
-    void detach(JSGlobalObject*);
+    void detach(Interpreter *interp);
 
     /**
      * Called to notify the debugger that some javascript source code has
@@ -115,7 +111,8 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool sourceParsed(ExecState*, const SourceCode&, int errorLine, const UString& errorMsg) = 0;
+    virtual bool sourceParsed(ExecState *exec, int sourceId, const UString &sourceURL,
+                              const UString &source, int startingLineNumber, int errorLine, const UString &errorMsg);
 
     /**
      * Called when all functions/programs associated with a particular
@@ -131,7 +128,7 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool sourceUnused(ExecState *exec, intptr_t sourceID);
+    virtual bool sourceUnused(ExecState *exec, int sourceId);
 
     /**
      * Called when an exception is thrown during script execution.
@@ -146,10 +143,8 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool exception(ExecState *exec, intptr_t sourceID, int lineno,
-                           JSValue *exception);
-
-    bool hasHandledException(ExecState *, JSValue *);
+    virtual bool exception(ExecState *exec, int sourceId, int lineno,
+                           JSObject *exceptionObj);
 
     /**
      * Called when a line of the script is reached (before it is executed)
@@ -166,7 +161,7 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool atStatement(ExecState *exec, intptr_t sourceID, int firstLine,
+    virtual bool atStatement(ExecState *exec, int sourceId, int firstLine,
                              int lastLine);
     /**
      * Called on each function call. Use together with @ref #returnEvent
@@ -188,7 +183,7 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool callEvent(ExecState *exec, intptr_t sourceID, int lineno,
+    virtual bool callEvent(ExecState *exec, int sourceId, int lineno,
                            JSObject *function, const List &args);
 
     /**
@@ -209,12 +204,11 @@ namespace KJS {
      * @return true if execution should be continue, false if it should
      * be aborted
      */
-    virtual bool returnEvent(ExecState *exec, intptr_t sourceID, int lineno,
+    virtual bool returnEvent(ExecState *exec, int sourceId, int lineno,
                              JSObject *function);
 
   private:
     DebuggerImp *rep;
-    HashMap<JSGlobalObject*, ProtectedPtr<JSValue> > latestExceptions;
 
   public:
     static int debuggersPresent;

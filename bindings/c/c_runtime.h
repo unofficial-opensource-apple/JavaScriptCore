@@ -26,9 +26,7 @@
 #ifndef BINDINGS_C_RUNTIME_H_
 #define BINDINGS_C_RUNTIME_H_
 
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
+#include "npruntime.h"
 #include "runtime.h"
 
 namespace KJS {
@@ -36,11 +34,12 @@ namespace Bindings {
 
 class CField : public Field {
 public:
-    CField(NPIdentifier ident) : _fieldIdentifier(ident) { }
+    CField(NPIdentifier ident) : _fieldIdentifier(ident) { _fieldIdentifier = ident; }
 
     virtual JSValue* valueFromInstance(ExecState*, const Instance*) const;
     virtual void setValueToInstance(ExecState*, const Instance*, JSValue*) const;
     virtual const char* name() const;
+    virtual RuntimeType type() const { return ""; }
 
 private:
     NPIdentifier _fieldIdentifier;
@@ -61,7 +60,5 @@ private:
 
 } // namespace Bindings
 } // namespace KJS
-
-#endif // ENABLE(NETSCAPE_API)
 
 #endif

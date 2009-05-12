@@ -23,6 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #ifndef KJS_BINDINGS_OBJC_UTILITY_H
 #define KJS_BINDINGS_OBJC_UTILITY_H
 
@@ -47,7 +49,6 @@ typedef union {
     short shortValue;
     int intValue;
     long longValue;
-    long long longLongValue;
     float floatValue;
     double doubleValue;
 } ObjcValue;
@@ -56,15 +57,9 @@ typedef enum {
     ObjcVoidType,
     ObjcObjectType,
     ObjcCharType,
-    ObjcUnsignedCharType,
     ObjcShortType,
-    ObjcUnsignedShortType,
     ObjcIntType,
-    ObjcUnsignedIntType,
     ObjcLongType,
-    ObjcUnsignedLongType,
-    ObjcLongLongType,
-    ObjcUnsignedLongLongType,
     ObjcFloatType,
     ObjcDoubleType,
     ObjcInvalidType
@@ -74,10 +69,12 @@ class RootObject;
 
 ObjcValue convertValueToObjcValue(ExecState *exec, JSValue *value, ObjcValueType type);
 JSValue *convertNSStringToString(NSString *nsstring);
-JSValue *convertObjcValueToValue(ExecState *exec, void *buffer, ObjcValueType type, RootObject*);
+JSValue *convertObjcValueToValue(ExecState *exec, void *buffer, ObjcValueType type);
 ObjcValueType objcValueTypeForType(const char *type);
 
 bool convertJSMethodNameToObjc(const char *JSName, char *buffer, size_t bufferSize);
+
+void *createObjcInstanceForValue(JSValue *value, const RootObject *origin, const RootObject *current);
 
 JSObject *throwError(ExecState *, ErrorType, NSString *message);
 
@@ -85,3 +82,5 @@ JSObject *throwError(ExecState *, ErrorType, NSString *message);
 } // namespace KJS
 
 #endif
+
+#endif // BINDINGS

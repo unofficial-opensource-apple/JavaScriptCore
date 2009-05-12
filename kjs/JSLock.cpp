@@ -24,94 +24,48 @@
 #include "JSLock.h"
 
 #include "collector.h"
-#if USE(MULTIPLE_THREADS)
-#include <pthread.h>
-#endif
 
 namespace KJS {
 
 #if USE(MULTIPLE_THREADS)
 
-// Acquire this mutex before accessing lock-related data.
-static pthread_mutex_t JSMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t interpreterLockOnce = PTHREAD_ONCE_INIT;
+static pthread_mutex_t interpreterLock;
+static int interpreterLockCount = 0;
 
-// Thread-specific key that tells whether a thread holds the JSMutex.
-pthread_key_t didLockJSMutex;
-
-// Lock nesting count.
-static int JSLockCount;
-
-static void createDidLockJSMutex()
+static void initializeJSLock()
 {
-    pthread_key_create(&didLockJSMutex, 0);
+  pthread_mutexattr_t attr;
+
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
+
+  pthread_mutex_init(&interpreterLock, &attr);
 }
-pthread_once_t createDidLockJSMutexOnce = PTHREAD_ONCE_INIT;
 
 void JSLock::lock()
 {
-    pthread_once(&createDidLockJSMutexOnce, createDidLockJSMutex);
-
-    if (!pthread_getspecific(didLockJSMutex)) {
-        int result;
-        result = pthread_mutex_lock(&JSMutex);
-        ASSERT(!result);
-        pthread_setspecific(didLockJSMutex, &didLockJSMutex);
-    }
-    ++JSLockCount;
+  pthread_once(&interpreterLockOnce, initializeJSLock);
+  int result;
+  result = pthread_mutex_lock(&interpreterLock);
+  ASSERT(result == 0);
+  interpreterLockCount++;
+  Collector::registerThread();
 }
 
 void JSLock::unlock()
 {
-    ASSERT(JSLockCount);
-    ASSERT(!!pthread_getspecific(didLockJSMutex));
-
-    --JSLockCount;
-    if (!JSLockCount) {
-        pthread_setspecific(didLockJSMutex, 0);
-        int result;
-        result = pthread_mutex_unlock(&JSMutex);
-        ASSERT(!result);
-    }
-}
-
-bool JSLock::currentThreadIsHoldingLock()
-{
-    pthread_once(&createDidLockJSMutexOnce, createDidLockJSMutex);
-    return !!pthread_getspecific(didLockJSMutex);
-}
-
-void JSLock::registerThread()
-{
-    Collector::registerThread();
-}
-
-JSLock::DropAllLocks::DropAllLocks()
-    : m_lockCount(0)
-{
-    pthread_once(&createDidLockJSMutexOnce, createDidLockJSMutex);
-
-    m_lockCount = !!pthread_getspecific(didLockJSMutex) ? JSLock::lockCount() : 0;
-    for (int i = 0; i < m_lockCount; i++)
-        JSLock::unlock();
-}
-
-JSLock::DropAllLocks::~DropAllLocks()
-{
-    for (int i = 0; i < m_lockCount; i++)
-        JSLock::lock();
-    m_lockCount = 0;
+  interpreterLockCount--;
+  int result;
+  result = pthread_mutex_unlock(&interpreterLock);
+  ASSERT(result == 0);
 }
 
 #else
 
 // If threading support is off, set the lock count to a constant value of 1 so assertions
 // that the lock is held don't fail
-const int JSLockCount = 1;
-
-bool JSLock::currentThreadIsHoldingLock()
-{
-    return true;
-}
+const int interpreterLockCount = 1;
 
 void JSLock::lock()
 {
@@ -121,23 +75,28 @@ void JSLock::unlock()
 {
 }
 
-void JSLock::registerThread()
-{
-}
+#endif
 
+int JSLock::lockCount()
+{
+    return interpreterLockCount;
+}
+        
 JSLock::DropAllLocks::DropAllLocks()
 {
+    int lockCount = JSLock::lockCount();
+    for (int i = 0; i < lockCount; i++) {
+        JSLock::unlock();
+    }
+    m_lockCount = lockCount;
 }
 
 JSLock::DropAllLocks::~DropAllLocks()
 {
-}
-
-#endif // USE(MULTIPLE_THREADS)
-
-int JSLock::lockCount()
-{
-    return JSLockCount;
+    int lockCount = m_lockCount;
+    for (int i = 0; i < lockCount; i++) {
+        JSLock::lock();
+    }
 }
 
 }
@@ -149,19 +108,20 @@ int JSLock::lockCount()
 extern "C" {
 #endif
 
-static JSLock::DropAllLocks* sLockDropper = NULL;
-    
-void JSLockDropAllLocks(void)
+int JSLockDropAllLocks(void)
 {
-    ASSERT(sLockDropper == NULL);
-    sLockDropper = new JSLock::DropAllLocks();
+    KJS::JSLock::lock();
+    int lockCount = KJS::JSLock::lockCount();
+    for (int i = 0; i < lockCount; i++)
+        KJS::JSLock::unlock();
+    return lockCount - 1;
 }
 
-void JSLockRecoverAllLocks(void)
+void JSLockRecoverAllLocks(int lockCount)
 {
-    ASSERT(sLockDropper != NULL);
-    delete sLockDropper;
-    sLockDropper = NULL;
+    ASSERT(KJS::JSLock::lockCount() == 0);
+    for (int i = 0; i < lockCount; i++)
+        KJS::JSLock::lock();
 }    
 
 static pthread_t javaScriptCollectionThread = 0;

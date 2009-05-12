@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, Apple Computer, Inc. and The Mozilla Foundation. 
+ * Copyright © 2004, Apple Computer, Inc. and The Mozilla Foundation. 
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -65,10 +65,11 @@
  * Added NPP arguments to NPObject functions.
  * Replaced NPVariant functions with macros.
  */
+
 #ifndef _NP_RUNTIME_H_
 #define _NP_RUNTIME_H_
 
-#if ENABLE(NETSCAPE_API)
+#if NETSCAPE_API
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,10 +77,6 @@ extern "C" {
 
 #include <stdint.h>
 #include "npapi.h"
-
-#if defined(XP_MACOSX) && defined(__LP64__)
-#error 64-bit Netscape plug-ins are not supported on Mac OS X
-#endif
 
 /*
     This API is used to facilitate binding code written in C to script
@@ -252,7 +249,6 @@ typedef bool (*NPHasPropertyFunctionPtr)(NPObject *obj, NPIdentifier name);
 typedef bool (*NPGetPropertyFunctionPtr)(NPObject *obj, NPIdentifier name, NPVariant *result);
 typedef bool (*NPSetPropertyFunctionPtr)(NPObject *obj, NPIdentifier name, const NPVariant *value);
 typedef bool (*NPRemovePropertyFunctionPtr)(NPObject *npobj, NPIdentifier name);
-typedef bool (*NPEnumerationFunctionPtr)(NPObject *npobj, NPIdentifier **value, uint32_t *count);
 
 /*
     NPObjects returned by create have a reference count of one.  It is the caller's responsibility
@@ -269,11 +265,6 @@ typedef bool (*NPEnumerationFunctionPtr)(NPObject *npobj, NPIdentifier **value, 
     native code is still retaining those NPObject instances.
     (The runtime will typically return immediately, with 0 or NULL, from an attempt to
     dispatch to a NPObject, but this behavior should not be depended upon.)
-    
-    The NPEnumerationFunctionPtr function may pass an array of                  
-    NPIdentifiers back to the caller. The callee allocs the memory of           
-    the array using NPN_MemAlloc(), and it's the caller's responsibility        
-    to release it using NPN_MemFree().           
 */
 struct NPClass
 {
@@ -288,13 +279,9 @@ struct NPClass
     NPGetPropertyFunctionPtr getProperty;
     NPSetPropertyFunctionPtr setProperty;
     NPRemovePropertyFunctionPtr removeProperty;
-    NPEnumerationFunctionPtr enumerate;
 };
 
-#define NP_CLASS_STRUCT_VERSION      2
-#define NP_CLASS_STRUCT_VERSION_ENUM 2                           
-#define NP_CLASS_STRUCT_VERSION_HAS_ENUM(npclass)   \
-    ((npclass)->structVersion >= NP_CLASS_STRUCT_VERSION_ENUM)
+#define NP_CLASS_STRUCT_VERSION 1
 
 struct NPObject {
     NPClass *_class;
@@ -341,7 +328,6 @@ bool NPN_SetProperty(NPP npp, NPObject *npobj, NPIdentifier propertyName, const 
 bool NPN_RemoveProperty(NPP npp, NPObject *npobj, NPIdentifier propertyName);
 bool NPN_HasProperty(NPP npp, NPObject *npobj, NPIdentifier propertyName);
 bool NPN_HasMethod(NPP npp, NPObject *npobj, NPIdentifier methodName);
-bool NPN_Enumerate(NPP npp, NPObject *npobj, NPIdentifier **identifier, uint32_t *count);
 
 /*
     NPN_SetException may be called to trigger a script exception upon return
@@ -353,6 +339,6 @@ void NPN_SetException (NPObject *obj, const NPUTF8 *message);
 }
 #endif
 
-#endif // ENABLE(NETSCAPE_API)
+#endif // NETSCAPE_API
 
 #endif

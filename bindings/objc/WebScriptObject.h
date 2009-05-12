@@ -22,13 +22,14 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
+#define BINDINGS 1
+
+#if BINDINGS
 
 #import <Foundation/Foundation.h>
 
 #include "internal.h"
 #include "runtime_root.h"
-
-@class WebUndefined;
 
 @protocol WebScriptObject
 + (NSString *)webScriptNameForSelector:(SEL)aSelector;
@@ -36,11 +37,9 @@
 + (NSString *)webScriptNameForKey:(const char *)name;
 + (BOOL)isKeyExcludedFromWebScript:(const char *)name;
 
-+ (id)_convertValueToObjcValue:(KJS::JSValue *)value originRootObject:(KJS::Bindings::RootObject*)originRootObject rootObject:(KJS::Bindings::RootObject*)rootObject;
-- _initWithJSObject:(KJS::JSObject*)imp originRootObject:(PassRefPtr<KJS::Bindings::RootObject>)originRootObject rootObject:(PassRefPtr<KJS::Bindings::RootObject>)rootObject;
++ (id)_convertValueToObjcValue:(KJS::JSValue *)value originExecutionContext:(const KJS::Bindings::RootObject *)originExecutionContext executionContext:(const KJS::Bindings::RootObject *)executionContext;
+- _initWithJSObject:(KJS::JSObject *)imp originExecutionContext:(const KJS::Bindings::RootObject *)originExecutionContext executionContext:(const KJS::Bindings::RootObject *)executionContext ;
 - (KJS::JSObject *)_imp;
 @end
 
-@protocol WebUndefined
-+ (WebUndefined *)undefined;
-@end
+#endif

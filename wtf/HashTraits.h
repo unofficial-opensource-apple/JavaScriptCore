@@ -20,13 +20,11 @@
  *
  */
 
-#ifndef WTF_HashTraits_h
-#define WTF_HashTraits_h
+#ifndef KXMLCORE_HASH_TRAITS_H
+#define KXMLCORE_HASH_TRAITS_H
 
-#include "Assertions.h"
 #include "HashFunctions.h"
 #include <utility>
-#include <limits>
 
 namespace WTF {
 
@@ -46,25 +44,6 @@ namespace WTF {
     template<> struct IsInteger<unsigned long>      { static const bool value = true; };
     template<> struct IsInteger<long long>          { static const bool value = true; };
     template<> struct IsInteger<unsigned long long> { static const bool value = true; };
-
-    COMPILE_ASSERT(IsInteger<bool>::value, WTF_IsInteger_bool_true);
-    COMPILE_ASSERT(IsInteger<char>::value, WTF_IsInteger_char_true);
-    COMPILE_ASSERT(IsInteger<signed char>::value, WTF_IsInteger_signed_char_true);
-    COMPILE_ASSERT(IsInteger<unsigned char>::value, WTF_IsInteger_unsigned_char_true);
-    COMPILE_ASSERT(IsInteger<short>::value, WTF_IsInteger_short_true);
-    COMPILE_ASSERT(IsInteger<unsigned short>::value, WTF_IsInteger_unsigned_short_true);
-    COMPILE_ASSERT(IsInteger<int>::value, WTF_IsInteger_int_true);
-    COMPILE_ASSERT(IsInteger<unsigned int>::value, WTF_IsInteger_unsigned_int_true);
-    COMPILE_ASSERT(IsInteger<long>::value, WTF_IsInteger_long_true);
-    COMPILE_ASSERT(IsInteger<unsigned long>::value, WTF_IsInteger_unsigned_long_true);
-    COMPILE_ASSERT(IsInteger<long long>::value, WTF_IsInteger_long_long_true);
-    COMPILE_ASSERT(IsInteger<unsigned long long>::value, WTF_IsInteger_unsigned_long_long_true);
-
-    COMPILE_ASSERT(!IsInteger<char*>::value, WTF_IsInteger_char_pointer_false);
-    COMPILE_ASSERT(!IsInteger<const char* >::value, WTF_IsInteger_const_char_pointer_false);
-    COMPILE_ASSERT(!IsInteger<volatile char* >::value, WTF_IsInteger_volatile_char_pointer__false);
-    COMPILE_ASSERT(!IsInteger<double>::value, WTF_IsInteger_double_false);
-    COMPILE_ASSERT(!IsInteger<float>::value, WTF_IsInteger_float_false);
 
     template<typename T> struct HashTraits;
 
@@ -99,34 +78,11 @@ namespace WTF {
     template<> struct HashTraits<int> : GenericHashTraits<int> {
         static int deletedValue() { return -1; }
     };
-    template<> struct HashTraits<unsigned int> : GenericHashTraits<unsigned int> {
-        static unsigned int deletedValue() { return static_cast<unsigned int>(-1); }
-    };
     template<> struct HashTraits<long> : GenericHashTraits<long> {
         static long deletedValue() { return -1; }
     };
-    template<> struct HashTraits<unsigned long> : GenericHashTraits<unsigned long> {
-        static unsigned long deletedValue() { return static_cast<unsigned long>(-1); }
-    };
     template<> struct HashTraits<long long> : GenericHashTraits<long long> {
-        static long long deletedValue() { return -1; }
-    };
-    template<> struct HashTraits<unsigned long long> : GenericHashTraits<unsigned long long> {
-        static unsigned long long deletedValue() { return static_cast<unsigned long long>(-1); }
-    };
-    
-    template<typename T> struct FloatHashTraits {
-        typedef T TraitType;
-        typedef HashTraits<T> StorageTraits;
-        static T emptyValue() { return std::numeric_limits<T>::infinity(); }
-        static T deletedValue() { return -std::numeric_limits<T>::infinity(); }
-        static const bool emptyValueIsZero = false;
-        static const bool needsDestruction = false;
-        static const bool needsRef = false;
-    };
-    template<> struct HashTraits<float> : FloatHashTraits<float> {
-    };
-    template<> struct HashTraits<double> : FloatHashTraits<double> {
+        static long deletedValue() { return -1; }
     };
 
     template<typename P> struct HashTraits<P*> : GenericHashTraits<P*> {
@@ -138,25 +94,10 @@ namespace WTF {
 
     template<typename P> struct HashTraits<RefPtr<P> > : GenericHashTraits<RefPtr<P> > {
         typedef HashTraits<typename IntTypes<sizeof(P*)>::SignedType> StorageTraits;
-        typedef typename StorageTraits::TraitType StorageType;
         static const bool emptyValueIsZero = true;
         static const bool needsRef = true;
-
-        typedef union { 
-            P* m_p; 
-            StorageType m_s; 
-        } UnionType;
-
-        static void ref(const StorageType& s) 
-        { 
-            if (const P* p = reinterpret_cast<const UnionType*>(&s)->m_p) 
-                const_cast<P*>(p)->ref(); 
-        }
-        static void deref(const StorageType& s) 
-        { 
-            if (const P* p = reinterpret_cast<const UnionType*>(&s)->m_p) 
-                const_cast<P*>(p)->deref(); 
-        }
+        static void ref(const RefPtr<P>& p) { if (p) p->ref(); }
+        static void deref(const RefPtr<P>& p) { if (p) p->deref(); }
     };
 
     // template to set deleted values
@@ -229,7 +170,7 @@ namespace WTF {
         }
     };
 
-    // hash functions and traits that are equivalent (for code sharing)
+    // hassh functions and traits that are equivalent (for code sharing)
 
     template<typename HashArg, typename TraitsArg> struct HashKeyStorageTraits {
         typedef HashArg Hash;
@@ -251,4 +192,4 @@ namespace WTF {
 using WTF::HashTraits;
 using WTF::PairHashTraits;
 
-#endif // WTF_HashTraits_h
+#endif // KXMLCORE_HASH_TRAITS_H

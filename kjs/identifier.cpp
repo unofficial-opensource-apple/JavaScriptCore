@@ -20,25 +20,37 @@
  */
 
 #include "config.h"
+// For JavaScriptCore we need to avoid having static constructors.
+// Our strategy is to declare the global objects with a different type (initialized to 0)
+// and then use placement new to initialize the global objects later. This is not completely
+// portable, and it would be good to figure out a 100% clean way that still avoids code that
+// runs at init time.
+
+#if !PLATFORM(WIN_OS) // can't get this to compile on Visual C++ yet
+#define AVOID_STATIC_CONSTRUCTORS 1
+#else
+#define AVOID_STATIC_CONSTRUCTORS 0
+#endif
+
+#if AVOID_STATIC_CONSTRUCTORS
+#define KJS_IDENTIFIER_HIDE_GLOBALS 1
+#endif
 
 #include "identifier.h"
 
-#include "JSLock.h"
-#include <new> // for placement new
-#include <string.h> // for strlen
-#include <wtf/Assertions.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/HashSet.h>
+#include <string.h> // for strlen
+#include <new> // for placement new
 
 namespace WTF {
 
-    template<typename T> struct DefaultHash;
-    template<typename T> struct StrHash;
+    template<typename T> class DefaultHash;
+    template<typename T> class StrHash;
 
     template<> struct StrHash<KJS::UString::Rep *> {
         static unsigned hash(const KJS::UString::Rep *key) { return key->hash(); }
         static bool equal(const KJS::UString::Rep *a, const KJS::UString::Rep *b) { return KJS::Identifier::equal(a, b); }
-        static const bool safeToCompareToEmptyOrDeleted = false;
     };
 
     template<> struct DefaultHash<KJS::UString::Rep *> {
@@ -54,8 +66,6 @@ static IdentifierTable *table;
 
 static inline IdentifierTable& identifierTable()
 {
-    ASSERT(JSLock::lockCount() > 0);
-
     if (!table)
         table = new IdentifierTable;
     return *table;
@@ -110,12 +120,12 @@ struct CStringTranslator
 
     static void translate(UString::Rep*& location, const char *c, unsigned hash)
     {
-        size_t length = strlen(c);
+        int length = strlen(c);
         UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * length));
-        for (size_t i = 0; i != length; i++)
+        for (int i = 0; i != length; i++)
             d[i] = c[i];
         
-        UString::Rep *r = UString::Rep::create(d, static_cast<int>(length)).releaseRef();
+        UString::Rep *r = UString::Rep::create(d, length).release();
         r->isIdentifier = 1;
         r->rc = 0;
         r->_hash = hash;
@@ -126,15 +136,11 @@ struct CStringTranslator
 
 PassRefPtr<UString::Rep> Identifier::add(const char *c)
 {
-    if (!c) {
-        UString::Rep::null.hash();
+    if (!c)
         return &UString::Rep::null;
-    }
-
-    if (!c[0]) {
-        UString::Rep::empty.hash();
+    int length = strlen(c);
+    if (length == 0)
         return &UString::Rep::empty;
-    }
     
     return *identifierTable().add<const char *, CStringTranslator>(c).first;
 }
@@ -162,7 +168,7 @@ struct UCharBufferTranslator
         for (unsigned i = 0; i != buf.length; i++)
             d[i] = buf.s[i];
         
-        UString::Rep *r = UString::Rep::create(d, buf.length).releaseRef();
+        UString::Rep *r = UString::Rep::create(d, buf.length).release();
         r->isIdentifier = 1;
         r->rc = 0;
         r->_hash = hash;
@@ -173,23 +179,20 @@ struct UCharBufferTranslator
 
 PassRefPtr<UString::Rep> Identifier::add(const UChar *s, int length)
 {
-    if (!length) {
-        UString::Rep::empty.hash();
+    if (length == 0)
         return &UString::Rep::empty;
-    }
     
     UCharBuffer buf = {s, length}; 
     return *identifierTable().add<UCharBuffer, UCharBufferTranslator>(buf).first;
 }
 
-PassRefPtr<UString::Rep> Identifier::addSlowCase(UString::Rep *r)
+PassRefPtr<UString::Rep> Identifier::add(UString::Rep *r)
 {
-    ASSERT(!r->isIdentifier);
+    if (r->isIdentifier)
+        return r;
 
-    if (r->len == 0) {
-        UString::Rep::empty.hash();
+    if (r->len == 0)
         return &UString::Rep::empty;
-    }
 
     UString::Rep *result = *identifierTable().add(r).first;
     if (result == r)
@@ -200,6 +203,44 @@ PassRefPtr<UString::Rep> Identifier::addSlowCase(UString::Rep *r)
 void Identifier::remove(UString::Rep *r)
 {
     identifierTable().remove(r);
+}
+
+// Global constants for property name strings.
+
+#if !AVOID_STATIC_CONSTRUCTORS
+    // Define an Identifier in the normal way.
+    #define DEFINE_GLOBAL(name, string) extern const Identifier name(string);
+#else
+    // Define an Identifier-sized array of pointers to avoid static initialization.
+    // Use an array of pointers instead of an array of char in case there is some alignment issue.
+    #define DEFINE_GLOBAL(name, string) \
+        void * name[(sizeof(Identifier) + sizeof(void *) - 1) / sizeof(void *)];
+#endif
+
+const char * const nullCString = 0;
+
+DEFINE_GLOBAL(nullIdentifier, nullCString)
+DEFINE_GLOBAL(specialPrototypePropertyName, "__proto__")
+
+#define DEFINE_PROPERTY_NAME_GLOBAL(name) DEFINE_GLOBAL(name ## PropertyName, #name)
+KJS_IDENTIFIER_EACH_PROPERTY_NAME_GLOBAL(DEFINE_PROPERTY_NAME_GLOBAL)
+
+void Identifier::init()
+{
+#if AVOID_STATIC_CONSTRUCTORS
+    static bool initialized;
+    if (!initialized) {
+        // Use placement new to initialize the globals.
+
+        new (&nullIdentifier) Identifier(nullCString);
+        new (&specialPrototypePropertyName) Identifier("__proto__");
+
+        #define PLACEMENT_NEW_PROPERTY_NAME_GLOBAL(name) new(&name ## PropertyName) Identifier(#name);
+        KJS_IDENTIFIER_EACH_PROPERTY_NAME_GLOBAL(PLACEMENT_NEW_PROPERTY_NAME_GLOBAL)
+
+        initialized = true;
+    }
+#endif
 }
 
 } // namespace KJS

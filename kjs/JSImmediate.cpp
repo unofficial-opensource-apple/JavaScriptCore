@@ -22,16 +22,13 @@
 #include "config.h"
 #include "JSImmediate.h"
 
-#include "JSGlobalObject.h"
-#include "bool_object.h"
-#include "number_object.h"
 #include "object.h"
 
 namespace KJS {
 
 JSObject *JSImmediate::toObject(const JSValue *v, ExecState *exec)
 {
-    ASSERT(isImmediate(v));
+    assert(isImmediate(v));
     if (v == jsNull())
         return throwError(exec, TypeError, "Null value");
     else if (v == jsUndefined())
@@ -39,12 +36,12 @@ JSObject *JSImmediate::toObject(const JSValue *v, ExecState *exec)
     else if (isBoolean(v)) {
         List args;
         args.append(const_cast<JSValue *>(v));
-        return exec->lexicalGlobalObject()->booleanConstructor()->construct(exec, args);
+        return exec->lexicalInterpreter()->builtinBoolean()->construct(exec, args);
     } else {
         ASSERT(isNumber(v));
         List args;
         args.append(const_cast<JSValue *>(v));
-        return exec->lexicalGlobalObject()->numberConstructor()->construct(exec, args);
+        return exec->lexicalInterpreter()->builtinNumber()->construct(exec, args);
     }
 }
 
@@ -61,7 +58,7 @@ UString JSImmediate::toString(const JSValue *v)
     else if (v == jsBoolean(false))
         return "false";
     else {
-        ASSERT(isNumber(v));
+        assert(isNumber(v));
         double d = toDouble(v);
         if (d == 0.0) // +0.0 or -0.0
             return "0";

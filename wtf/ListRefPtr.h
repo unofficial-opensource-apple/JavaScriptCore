@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef WTF_ListRefPtr_h
-#define WTF_ListRefPtr_h
+#ifndef KXMLCORE_LIST_REF_PTR_H
+#define KXMLCORE_LIST_REF_PTR_H
 
 #include <wtf/RefPtr.h>
 
@@ -58,4 +58,4 @@ namespace WTF {
 
 using WTF::ListRefPtr;
 
-#endif // WTF_ListRefPtr_h
+#endif // KXMLCORE_LIST_REF_PTR_H

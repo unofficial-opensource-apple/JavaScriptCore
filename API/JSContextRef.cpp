@@ -1,6 +1,6 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,15 +24,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
+#include "APICast.h"
 #include "JSContextRef.h"
 
-#include "APICast.h"
 #include "JSCallbackObject.h"
-#include "JSClassRef.h"
-#include "JSGlobalObject.h"
+#include "completion.h"
+#include "interpreter.h"
 #include "object.h"
-#include <wtf/Platform.h>
 
 using namespace KJS;
 
@@ -40,17 +38,15 @@ JSGlobalContextRef JSGlobalContextCreate(JSClassRef globalObjectClass)
 {
     JSLock lock;
 
-    if (!globalObjectClass) {
-        JSGlobalObject* globalObject = new JSGlobalObject;
-        return JSGlobalContextRetain(toGlobalRef(globalObject->globalExec()));
-    }
+    JSObject* globalObject;
+    if (globalObjectClass)
+        // FIXME: We need to pass a real ExecState here to support an initialize callback in globalObjectClass
+        globalObject = new JSCallbackObject(0, globalObjectClass, 0, 0);
+    else
+        globalObject = new JSObject();
 
-    JSGlobalObject* globalObject = new JSCallbackObject<JSGlobalObject>(globalObjectClass);
-    JSGlobalContextRef ctx = toGlobalRef(globalObject->globalExec());
-    JSValue* prototype = globalObjectClass->prototype(ctx);
-    if (!prototype)
-        prototype = jsNull();
-    globalObject->reset(prototype);
+    Interpreter* interpreter = new Interpreter(globalObject); // adds the built-in object prototype to the global object
+    JSGlobalContextRef ctx = reinterpret_cast<JSGlobalContextRef>(interpreter->globalExec());
     return JSGlobalContextRetain(ctx);
 }
 
@@ -58,7 +54,7 @@ JSGlobalContextRef JSGlobalContextRetain(JSGlobalContextRef ctx)
 {
     JSLock lock;
     ExecState* exec = toJS(ctx);
-    gcProtect(exec->dynamicGlobalObject());
+    exec->dynamicInterpreter()->ref();
     return ctx;
 }
 
@@ -66,11 +62,11 @@ void JSGlobalContextRelease(JSGlobalContextRef ctx)
 {
     JSLock lock;
     ExecState* exec = toJS(ctx);
-    gcUnprotect(exec->dynamicGlobalObject());
+    exec->dynamicInterpreter()->deref();
 }
 
 JSObjectRef JSContextGetGlobalObject(JSContextRef ctx)
 {
     ExecState* exec = toJS(ctx);
-    return toRef(exec->dynamicGlobalObject());
+    return toRef(exec->dynamicInterpreter()->globalObject());
 }

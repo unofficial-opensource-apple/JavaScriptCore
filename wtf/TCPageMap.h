@@ -45,6 +45,8 @@
 #ifndef TCMALLOC_PAGEMAP_H__
 #define TCMALLOC_PAGEMAP_H__
 
+#include "config.h"
+
 #if HAVE(STDINT_H)
 #include <stdint.h>
 #elif HAVE(INTTYPES_H)
@@ -66,7 +68,7 @@ class TCMalloc_PageMap1 {
  public:
   typedef uintptr_t Number;
 
-  void init(void* (*allocator)(size_t)) {
+  explicit TCMalloc_PageMap1(void* (*allocator)(size_t)) {
     array_ = reinterpret_cast<void**>((*allocator)(sizeof(void*) << BITS));
     memset(array_, 0, sizeof(void*) << BITS);
   }
@@ -77,8 +79,6 @@ class TCMalloc_PageMap1 {
     // Nothing to do since flat array was allocate at start
     return true;
   }
-
-  void PreallocateMoreMemory() {}
 
   // REQUIRES "k" is in range "[0,2^BITS-1]".
   // REQUIRES "k" has been ensured before.
@@ -120,7 +120,7 @@ class TCMalloc_PageMap2 {
  public:
   typedef uintptr_t Number;
 
-  void init(void* (*allocator)(size_t)) {
+  explicit TCMalloc_PageMap2(void* (*allocator)(size_t)) {
     allocator_ = allocator;
     memset(root_, 0, sizeof(root_));
   }
@@ -156,26 +156,6 @@ class TCMalloc_PageMap2 {
     }
     return true;
   }
-
-  void PreallocateMoreMemory() {
-    // Allocate enough to keep track of all possible pages
-    Ensure(0, 1 << BITS);
-  }
-
-#ifdef WTF_CHANGES
-  template<class Visitor, class MemoryReader>
-  void visit(const Visitor& visitor, const MemoryReader& reader)
-  {
-    for (int i = 0; i < ROOT_LENGTH; i++) {
-      if (!root_[i])
-        continue;
-
-      Leaf* l = reader(reinterpret_cast<Leaf*>(root_[i]));
-      for (int j = 0; j < LEAF_LENGTH; j += visitor.visit(l->values[j]))
-        ;
-    }
-  }
-#endif
 };
 
 // Three-level radix tree
@@ -214,7 +194,7 @@ class TCMalloc_PageMap3 {
  public:
   typedef uintptr_t Number;
 
-  void init(void* (*allocator)(size_t)) {
+  explicit TCMalloc_PageMap3(void* (*allocator)(size_t)) {
     allocator_ = allocator;
     root_ = NewNode();
   }
@@ -260,30 +240,6 @@ class TCMalloc_PageMap3 {
     }
     return true;
   }
-
-  void PreallocateMoreMemory() {
-  }
-
-#ifdef WTF_CHANGES
-  template<class Visitor, class MemoryReader>
-  void visit(const Visitor& visitor, const MemoryReader& reader) {
-    Node* root = reader(root_);
-    for (int i = 0; i < INTERIOR_LENGTH; i++) {
-      if (!root->ptrs[i])
-        continue;
-
-      Node* n = reader(root->ptrs[i]);
-      for (int j = 0; j < INTERIOR_LENGTH; j++) {
-        if (!n->ptrs[j])
-          continue;
-
-        Leaf* l = reader(reinterpret_cast<Leaf*>(n->ptrs[j]));
-        for (int k = 0; k < LEAF_LENGTH; k += visitor.visit(l->values[k]))
-          ;
-      }
-    }
-  }
-#endif
 };
 
 #endif  // TCMALLOC_PAGEMAP_H__

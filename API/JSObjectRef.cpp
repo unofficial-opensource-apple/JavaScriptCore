@@ -1,6 +1,6 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,33 +24,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
-#include "JSObjectRef.h"
-
-#include <wtf/Platform.h>
 #include "APICast.h"
 #include "JSValueRef.h"
+#include "JSObjectRef.h"
 #include "JSCallbackConstructor.h"
 #include "JSCallbackFunction.h"
 #include "JSCallbackObject.h"
 #include "JSClassRef.h"
-#include "JSGlobalObject.h"
 
-#include "PropertyNameArray.h"
-#include "function.h"
-#include "function_object.h"
 #include "identifier.h"
+#include "function.h"
+#include "nodes.h"
 #include "internal.h"
 #include "object.h"
-#include "object_object.h"
+#include "PropertyNameArray.h"
 
 using namespace KJS;
 
-JSClassRef JSClassCreate(const JSClassDefinition* definition)
+JSClassRef JSClassCreate(JSClassDefinition* definition)
 {
-    JSLock lock;
-    JSClassRef jsClass = (definition->attributes & kJSClassAttributeNoAutomaticPrototype)
-        ? OpaqueJSClass::createNoAutomaticPrototype(definition)
+    JSClassRef jsClass = (definition->attributes & kJSClassAttributeNoPrototype)
+        ? OpaqueJSClass::createNoPrototype(definition)
         : OpaqueJSClass::create(definition);
     
     return JSClassRetain(jsClass);
@@ -58,15 +52,14 @@ JSClassRef JSClassCreate(const JSClassDefinition* definition)
 
 JSClassRef JSClassRetain(JSClassRef jsClass)
 {
-    JSLock lock;
-    jsClass->ref();
+    ++jsClass->refCount;
     return jsClass;
 }
 
 void JSClassRelease(JSClassRef jsClass)
 {
-    JSLock lock;
-    jsClass->deref();
+    if (--jsClass->refCount == 0)
+        delete jsClass;
 }
 
 JSObjectRef JSObjectMake(JSContextRef ctx, JSClassRef jsClass, void* data)
@@ -74,14 +67,27 @@ JSObjectRef JSObjectMake(JSContextRef ctx, JSClassRef jsClass, void* data)
     JSLock lock;
     ExecState* exec = toJS(ctx);
 
+    JSValue* jsPrototype = jsClass 
+        ? jsClass->prototype(ctx) 
+        : exec->lexicalInterpreter()->builtinObjectPrototype();
+
+    return JSObjectMakeWithPrototype(ctx, jsClass, data, toRef(jsPrototype));
+}
+
+JSObjectRef JSObjectMakeWithPrototype(JSContextRef ctx, JSClassRef jsClass, void* data, JSValueRef prototype)
+{
+    JSLock lock;
+
+    ExecState* exec = toJS(ctx);
+    JSValue* jsPrototype = toJS(prototype);
+
+    if (!prototype)
+        jsPrototype = exec->lexicalInterpreter()->builtinObjectPrototype();
+
     if (!jsClass)
-        return toRef(new JSObject(exec->lexicalGlobalObject()->objectPrototype())); // slightly more efficient
-
-    JSValue* jsPrototype = jsClass->prototype(ctx);
-    if (!jsPrototype)
-        jsPrototype = exec->lexicalGlobalObject()->objectPrototype();
-
-    return toRef(new JSCallbackObject<JSObject>(exec, jsClass, jsPrototype, data));
+        return toRef(new JSObject(jsPrototype)); // slightly more efficient
+    
+    return toRef(new JSCallbackObject(exec, jsClass, jsPrototype, data));
 }
 
 JSObjectRef JSObjectMakeFunctionWithCallback(JSContextRef ctx, JSStringRef name, JSObjectCallAsFunctionCallback callAsFunction)
@@ -100,10 +106,10 @@ JSObjectRef JSObjectMakeConstructor(JSContextRef ctx, JSClassRef jsClass, JSObje
     
     JSValue* jsPrototype = jsClass 
         ? jsClass->prototype(ctx)
-        : exec->dynamicGlobalObject()->objectPrototype();
+        : exec->dynamicInterpreter()->builtinObjectPrototype();
     
-    JSCallbackConstructor* constructor = new JSCallbackConstructor(exec, jsClass, callAsConstructor);
-    constructor->putDirect(exec->propertyNames().prototype, jsPrototype, DontEnum | DontDelete | ReadOnly);
+    JSObject* constructor = new JSCallbackConstructor(exec, jsClass, callAsConstructor);
+    constructor->put(exec, prototypePropertyName, jsPrototype, DontEnum|DontDelete|ReadOnly);
     return toRef(constructor);
 }
 
@@ -122,7 +128,7 @@ JSObjectRef JSObjectMakeFunction(JSContextRef ctx, JSStringRef name, unsigned pa
         args.append(jsString(UString(toJS(parameterNames[i]))));
     args.append(jsString(UString(bodyRep)));
 
-    JSObject* result = exec->dynamicGlobalObject()->functionConstructor()->construct(exec, args, nameID, UString(sourceURLRep), startingLineNumber);
+    JSObject* result = exec->dynamicInterpreter()->builtinFunction()->construct(exec, args, nameID, UString(sourceURLRep), startingLineNumber);
     if (exec->hadException()) {
         if (exception)
             *exception = toRef(exec->exception());
@@ -239,10 +245,8 @@ void* JSObjectGetPrivate(JSObjectRef object)
 {
     JSObject* jsObject = toJS(object);
     
-    if (jsObject->inherits(&JSCallbackObject<JSGlobalObject>::info))
-        return static_cast<JSCallbackObject<JSGlobalObject>*>(jsObject)->getPrivate();
-    else if (jsObject->inherits(&JSCallbackObject<JSObject>::info))
-        return static_cast<JSCallbackObject<JSObject>*>(jsObject)->getPrivate();
+    if (jsObject->inherits(&JSCallbackObject::info))
+        return static_cast<JSCallbackObject*>(jsObject)->getPrivate();
     
     return 0;
 }
@@ -251,11 +255,8 @@ bool JSObjectSetPrivate(JSObjectRef object, void* data)
 {
     JSObject* jsObject = toJS(object);
     
-    if (jsObject->inherits(&JSCallbackObject<JSGlobalObject>::info)) {
-        static_cast<JSCallbackObject<JSGlobalObject>*>(jsObject)->setPrivate(data);
-        return true;
-    } else if (jsObject->inherits(&JSCallbackObject<JSObject>::info)) {
-        static_cast<JSCallbackObject<JSObject>*>(jsObject)->setPrivate(data);
+    if (jsObject->inherits(&JSCallbackObject::info)) {
+        static_cast<JSCallbackObject*>(jsObject)->setPrivate(data);
         return true;
     }
         
@@ -276,7 +277,7 @@ JSValueRef JSObjectCallAsFunction(JSContextRef ctx, JSObjectRef object, JSObject
     JSObject* jsThisObject = toJS(thisObject);
 
     if (!jsThisObject)
-        jsThisObject = exec->dynamicGlobalObject();
+        jsThisObject = exec->dynamicInterpreter()->globalObject();
     
     List argList;
     for (size_t i = 0; i < argumentCount; i++)
@@ -342,14 +343,12 @@ JSPropertyNameArrayRef JSObjectCopyPropertyNames(JSContextRef ctx, JSObjectRef o
 
 JSPropertyNameArrayRef JSPropertyNameArrayRetain(JSPropertyNameArrayRef array)
 {
-    JSLock lock;
     ++array->refCount;
     return array;
 }
 
 void JSPropertyNameArrayRelease(JSPropertyNameArrayRef array)
 {
-    JSLock lock;
     if (--array->refCount == 0)
         delete array;
 }
@@ -361,7 +360,7 @@ size_t JSPropertyNameArrayGetCount(JSPropertyNameArrayRef array)
 
 JSStringRef JSPropertyNameArrayGetNameAtIndex(JSPropertyNameArrayRef array, size_t index)
 {
-    return toRef(array->array[static_cast<unsigned>(index)].ustring().rep());
+    return toRef(array->array[index].ustring().rep());
 }
 
 void JSPropertyNameAccumulatorAddName(JSPropertyNameAccumulatorRef array, JSStringRef propertyName)

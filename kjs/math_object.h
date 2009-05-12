@@ -23,43 +23,30 @@
 #define MATH_OBJECT_H_
 
 #include "function_object.h"
-#include "lookup.h"
 
 namespace KJS {
 
-    class MathObjectImp : public JSObject {
-    public:
-        MathObjectImp(ExecState*, ObjectPrototype*);
+  class MathObjectImp : public JSObject {
+  public:
+    MathObjectImp(ExecState *exec,
+                  ObjectPrototype *objProto);
+    bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
+    JSValue *getValueProperty(ExecState *exec, int token) const;
+    virtual const ClassInfo *classInfo() const { return &info; }
+    static const ClassInfo info;
+    enum { Euler, Ln2, Ln10, Log2E, Log10E, Pi, Sqrt1_2, Sqrt2,
+           Abs, ACos, ASin, ATan, ATan2, Ceil, Cos, Pow,
+           Exp, Floor, Log, Max, Min, Random, Round, Sin, Sqrt, Tan };
+  };
 
-        bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
-        JSValue* getValueProperty(ExecState*, int token) const;
+  class MathFuncImp : public InternalFunctionImp {
+  public:
+    MathFuncImp(ExecState *exec, int i, int l, const Identifier&);
+    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
+  private:
+    int id;
+  };
 
-        virtual const ClassInfo* classInfo() const { return &info; }
-        static const ClassInfo info;
+} // namespace
 
-        enum { Euler, Ln2, Ln10, Log2E, Log10E, Pi, Sqrt1_2, Sqrt2 };
-    };
-
-    // Functions
-    JSValue* mathProtoFuncAbs(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncACos(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncASin(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncATan(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncATan2(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncCeil(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncCos(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncExp(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncFloor(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncLog(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncMax(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncMin(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncPow(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncRandom(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncRound(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncSin(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncSqrt(ExecState*, JSObject*, const List&);
-    JSValue* mathProtoFuncTan(ExecState*, JSObject*, const List&);
-
-} // namespace KJS
-
-#endif // MATH_OBJECT_H_
+#endif

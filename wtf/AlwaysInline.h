@@ -1,5 +1,6 @@
 /*
- *  Copyright (C) 2005, 2007 Apple Inc. All rights reserved.
+ *  This file is part of the KDE libraries
+ *  Copyright (C) 2005 Apple Computer, Inc
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -19,19 +20,9 @@
  */
 
 #ifndef ALWAYS_INLINE
-#if COMPILER(GCC) && defined(NDEBUG)
+#if COMPILER(GCC)
 #define ALWAYS_INLINE inline __attribute__ ((__always_inline__))
-#elif COMPILER(MSVC) && defined(NDEBUG)
-#define ALWAYS_INLINE __forceinline
 #else
 #define ALWAYS_INLINE inline
-#endif
-#endif
-
-#ifndef NEVER_INLINE
-#if COMPILER(GCC)
-#define NEVER_INLINE __attribute__ ((__noinline__))
-#else
-#define NEVER_INLINE
 #endif
 #endif

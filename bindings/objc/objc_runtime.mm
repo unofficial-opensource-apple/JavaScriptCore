@@ -23,6 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #include "config.h"
 #include "objc_runtime.h"
 
@@ -34,17 +36,7 @@
 using namespace KJS;
 using namespace KJS::Bindings;
 
-extern ClassStructPtr KJS::Bindings::webScriptObjectClass()
-{
-    static ClassStructPtr<WebScriptObject> webScriptObjectClass = NSClassFromString(@"WebScriptObject");
-    return webScriptObjectClass;
-}
-
-extern ClassStructPtr KJS::Bindings::webUndefinedClass()
-{
-    static ClassStructPtr<WebUndefined> webUndefinedClass = NSClassFromString(@"WebUndefined");
-    return webUndefinedClass;
-}
+ClassStructPtr<WebScriptObject> KJS::Bindings::webScriptObjectClass = 0;
 
 // ---------------------- ObjcMethod ----------------------
 
@@ -67,11 +59,20 @@ int ObjcMethod::numParameters() const
 
 NSMethodSignature* ObjcMethod::getMethodSignature() const
 {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
     return [_objcClass instanceMethodSignatureForSelector:sel_registerName(_selector)];
 #else
     return [_objcClass instanceMethodSignatureForSelector:(SEL)_selector];
 #endif
+}
+
+void ObjcMethod::setJavaScriptName (CFStringRef n)
+{
+    if (n != _javaScriptName) {
+        if (_javaScriptName)
+            CFRelease (_javaScriptName);
+        _javaScriptName = (CFStringRef)CFRetain (n);
+    }
 }
 
 // ---------------------- ObjcField ----------------------
@@ -90,43 +91,57 @@ ObjcField::ObjcField(CFStringRef name)
 
 const char* ObjcField::name() const 
 {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
     if (_ivar)
         return ivar_getName(_ivar);
 #else
     if (_ivar)
         return _ivar->ivar_name;
 #endif
-    return [(NSString*)_name.get() UTF8String];
+    return [(NSString*)_name UTF8String];
+}
+
+RuntimeType ObjcField::type() const 
+{ 
+#if OBJC_API_VERSION >= 2
+    if (_ivar)
+        return ivar_getTypeEncoding(_ivar);
+#else
+    if (_ivar)
+        return _ivar->ivar_type;
+#endif
+
+    // Type is irrelevant if we use KV to set/get the value.
+    return "";
 }
 
 JSValue* ObjcField::valueFromInstance(ExecState* exec, const Instance* instance) const
 {
-    JSValue* result = jsUndefined();
-    
     id targetObject = (static_cast<const ObjcInstance*>(instance))->getObject();
-
-   JSLock::DropAllLocks dropAllLocks; // Can't put this inside the @try scope because it unwinds incorrectly.
 
     @try {
         NSString* key = [NSString stringWithCString:name() encoding:NSASCIIStringEncoding];
-        if (id objcValue = [targetObject valueForKey:key])
-            result = convertObjcValueToValue(exec, &objcValue, ObjcObjectType, instance->rootObject());
+        id objcValue = [targetObject valueForKey:key];
+        if (objcValue)
+            return convertObjcValueToValue(exec, &objcValue, ObjcObjectType);
     } @catch(NSException* localException) {
-        JSLock::lock();
         throwError(exec, GeneralError, [localException reason]);
-        JSLock::unlock();
     }
 
-    return result;
+    return jsUndefined();
 }
 
-static id convertValueToObjcObject(ExecState* exec, JSValue* value)
+static id convertValueToObjcObject (ExecState* exec, JSValue* value)
 {
-    RefPtr<RootObject> rootObject = findRootObject(exec->dynamicGlobalObject());
-    if (!rootObject)
-        return nil;
-    return [webScriptObjectClass() _convertValueToObjcValue:value originRootObject:rootObject.get() rootObject:rootObject.get()];
+    const Bindings::RootObject* root = rootForInterpreter(exec->dynamicInterpreter());
+    if (!root) {
+        Bindings::RootObject* newRoot = new Bindings::RootObject(0);
+        newRoot->setInterpreter(exec->dynamicInterpreter());
+        root = newRoot;
+    }
+    if (!webScriptObjectClass)
+        webScriptObjectClass = NSClassFromString(@"WebScriptObject");
+    return [webScriptObjectClass _convertValueToObjcValue:value originExecutionContext:root executionContext:root ];
 }
 
 void ObjcField::setValueToInstance(ExecState* exec, const Instance* instance, JSValue* aValue) const
@@ -134,34 +149,49 @@ void ObjcField::setValueToInstance(ExecState* exec, const Instance* instance, JS
     id targetObject = (static_cast<const ObjcInstance*>(instance))->getObject();
     id value = convertValueToObjcObject(exec, aValue);
 
-   JSLock::DropAllLocks dropAllLocks; // Can't put this inside the @try scope because it unwinds incorrectly.
-
     @try {
         NSString* key = [NSString stringWithCString:name() encoding:NSASCIIStringEncoding];
         [targetObject setValue:value forKey:key];
     } @catch(NSException* localException) {
-        JSLock::lock();
         throwError(exec, GeneralError, [localException reason]);
-        JSLock::unlock();
     }
 }
 
 // ---------------------- ObjcArray ----------------------
 
-ObjcArray::ObjcArray(ObjectStructPtr a, PassRefPtr<RootObject> rootObject)
-    : Array(rootObject)
-    , _array(a)
+ObjcArray::ObjcArray (ObjectStructPtr a) 
 {
+    _array = (id)CFRetain(a);
+}
+
+ObjcArray::~ObjcArray () 
+{
+    CFRelease(_array);
+}
+
+ObjcArray::ObjcArray (const ObjcArray &other) : Array() 
+{
+    _array = other._array;
+    CFRetain(_array);
+}
+
+ObjcArray &ObjcArray::operator=(const ObjcArray &other)
+{
+    ObjectStructPtr _oldArray = _array;
+    _array = other._array;
+    CFRetain(_array);
+    CFRelease(_oldArray);
+    return* this;
 }
 
 void ObjcArray::setValueAt(ExecState* exec, unsigned int index, JSValue* aValue) const
 {
-    if (![_array.get() respondsToSelector:@selector(insertObject:atIndex:)]) {
+    if (![_array respondsToSelector:@selector(insertObject:atIndex:)]) {
         throwError(exec, TypeError, "Array is not mutable.");
         return;
     }
 
-    if (index > [_array.get() count]) {
+    if (index > [_array count]) {
         throwError(exec, RangeError, "Index exceeds array size.");
         return;
     }
@@ -171,7 +201,7 @@ void ObjcArray::setValueAt(ExecState* exec, unsigned int index, JSValue* aValue)
     ObjcValue oValue = convertValueToObjcValue (exec, aValue, ObjcObjectType);
 
     @try {
-        [_array.get() insertObject:oValue.objectValue atIndex:index];
+        [_array insertObject:oValue.objectValue atIndex:index];
     } @catch(NSException* localException) {
         throwError(exec, GeneralError, "Objective-C exception.");
     }
@@ -179,12 +209,12 @@ void ObjcArray::setValueAt(ExecState* exec, unsigned int index, JSValue* aValue)
 
 JSValue* ObjcArray::valueAt(ExecState* exec, unsigned int index) const
 {
-    if (index > [_array.get() count])
+    if (index > [_array count])
         return throwError(exec, RangeError, "Index exceeds array size.");
     @try {
-        id obj = [_array.get() objectAtIndex:index];
+        id obj = [_array objectAtIndex:index];
         if (obj)
-            return convertObjcValueToValue (exec, &obj, ObjcObjectType, _rootObject.get());
+            return convertObjcValueToValue (exec, &obj, ObjcObjectType);
     } @catch(NSException* localException) {
         return throwError(exec, GeneralError, "Objective-C exception.");
     }
@@ -193,10 +223,10 @@ JSValue* ObjcArray::valueAt(ExecState* exec, unsigned int index) const
 
 unsigned int ObjcArray::getLength() const
 {
-    return [_array.get() count];
+    return [_array count];
 }
 
-const ClassInfo ObjcFallbackObjectImp::info = { "ObjcFallbackObject", 0, 0 };
+const ClassInfo ObjcFallbackObjectImp::info = {"ObjcFallbackObject", 0, 0, 0};
 
 ObjcFallbackObjectImp::ObjcFallbackObjectImp(ObjcInstance* i, const KJS::Identifier propertyName)
 : _instance(i)
@@ -243,33 +273,29 @@ bool ObjcFallbackObjectImp::implementsCall() const
 
 JSValue* ObjcFallbackObjectImp::callAsFunction(ExecState* exec, JSObject* thisObj, const List &args)
 {
-    if (thisObj->classInfo() != &KJS::RuntimeObjectImp::info)
-        return throwError(exec, TypeError);
-
     JSValue* result = jsUndefined();
-
+    
     RuntimeObjectImp* imp = static_cast<RuntimeObjectImp*>(thisObj);
-    Instance* instance = imp->getInternalInstance();
+    if (imp) {
+        Instance* instance = imp->getInternalInstance();
+        
+        instance->begin();
 
-    if (!instance)
-        return RuntimeObjectImp::throwInvalidAccessError(exec);
-    
-    instance->begin();
-
-    ObjcInstance* objcInstance = static_cast<ObjcInstance*>(instance);
-    id targetObject = objcInstance->getObject();
-    
-    if ([targetObject respondsToSelector:@selector(invokeUndefinedMethodFromWebScript:withArguments:)]){
-        MethodList methodList;
-        ObjcClass* objcClass = static_cast<ObjcClass*>(instance->getClass());
-        ObjcMethod* fallbackMethod = new ObjcMethod (objcClass->isa(), sel_getName(@selector(invokeUndefinedMethodFromWebScript:withArguments:)));
-        fallbackMethod->setJavaScriptName((CFStringRef)[NSString stringWithCString:_item.ascii() encoding:NSASCIIStringEncoding]);
-        methodList.append(fallbackMethod);
-        result = instance->invokeMethod(exec, methodList, args);
-        delete fallbackMethod;
+        ObjcInstance* objcInstance = static_cast<ObjcInstance*>(instance);
+        id targetObject = objcInstance->getObject();
+        
+        if ([targetObject respondsToSelector:@selector(invokeUndefinedMethodFromWebScript:withArguments:)]){
+            MethodList methodList;
+            ObjcClass* objcClass = static_cast<ObjcClass*>(instance->getClass());
+            ObjcMethod* fallbackMethod = new ObjcMethod (objcClass->isa(), (const char*)@selector(invokeUndefinedMethodFromWebScript:withArguments:));
+            fallbackMethod->setJavaScriptName((CFStringRef)[NSString stringWithCString:_item.ascii() encoding:NSASCIIStringEncoding]);
+            methodList.addMethod ((Method*)fallbackMethod);
+            result = instance->invokeMethod(exec, methodList, args);
+            delete fallbackMethod;
+        }
+                
+        instance->end();
     }
-            
-    instance->end();
 
     return result;
 }
@@ -293,3 +319,5 @@ bool ObjcFallbackObjectImp::toBoolean(ExecState *) const
     
     return false;
 }
+
+#endif //BINDINGS

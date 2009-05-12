@@ -36,11 +36,11 @@
 extern "C" {
 #endif
 
-#if !defined(WIN32) && !defined(_WIN32)
 /*!
 @typedef JSChar
 @abstract A Unicode character.
 */
+#if !defined(WIN32) && !defined(_WIN32)
     typedef unsigned short JSChar;
 #else
     typedef wchar_t JSChar;
@@ -53,14 +53,14 @@ extern "C" {
 @param numChars   The number of characters to copy from the buffer pointed to by chars.
 @result           A JSString containing chars. Ownership follows the Create Rule.
 */
-JS_EXPORT JSStringRef JSStringCreateWithCharacters(const JSChar* chars, size_t numChars);
+JSStringRef JSStringCreateWithCharacters(const JSChar* chars, size_t numChars);
 /*!
 @function
 @abstract         Creates a JavaScript string from a null-terminated UTF8 string.
 @param string     The null-terminated UTF8 string to copy into the new JSString.
 @result           A JSString containing string. Ownership follows the Create Rule.
 */
-JS_EXPORT JSStringRef JSStringCreateWithUTF8CString(const char* string);
+JSStringRef JSStringCreateWithUTF8CString(const char* string);
 
 /*!
 @function
@@ -68,13 +68,13 @@ JS_EXPORT JSStringRef JSStringCreateWithUTF8CString(const char* string);
 @param string     The JSString to retain.
 @result           A JSString that is the same as string.
 */
-JS_EXPORT JSStringRef JSStringRetain(JSStringRef string);
+JSStringRef JSStringRetain(JSStringRef string);
 /*!
 @function
 @abstract         Releases a JavaScript string.
 @param string     The JSString to release.
 */
-JS_EXPORT void JSStringRelease(JSStringRef string);
+void JSStringRelease(JSStringRef string);
 
 /*!
 @function
@@ -82,7 +82,7 @@ JS_EXPORT void JSStringRelease(JSStringRef string);
 @param string     The JSString whose length (in Unicode characters) you want to know.
 @result           The number of Unicode characters stored in string.
 */
-JS_EXPORT size_t JSStringGetLength(JSStringRef string);
+size_t JSStringGetLength(JSStringRef string);
 /*!
 @function
 @abstract         Returns a pointer to the Unicode character buffer that 
@@ -91,7 +91,7 @@ JS_EXPORT size_t JSStringGetLength(JSStringRef string);
 @result           A pointer to the Unicode character buffer that serves as string's 
  backing store, which will be deallocated when string is deallocated.
 */
-JS_EXPORT const JSChar* JSStringGetCharactersPtr(JSStringRef string);
+const JSChar* JSStringGetCharactersPtr(JSStringRef string);
 
 /*!
 @function
@@ -103,7 +103,7 @@ JS_EXPORT const JSChar* JSStringGetCharactersPtr(JSStringRef string);
  null-terminated UTF8 string. The number of bytes that the conversion actually ends 
  up requiring could be less than this, but never more.
 */
-JS_EXPORT size_t JSStringGetMaximumUTF8CStringSize(JSStringRef string);
+size_t JSStringGetMaximumUTF8CStringSize(JSStringRef string);
 /*!
 @function
 @abstract Converts a JavaScript string into a null-terminated UTF8 string, 
@@ -117,7 +117,7 @@ JS_EXPORT size_t JSStringGetMaximumUTF8CStringSize(JSStringRef string);
 @param bufferSize The size of the external buffer in bytes.
 @result The number of bytes written into buffer (including the null-terminator byte).
 */
-JS_EXPORT size_t JSStringGetUTF8CString(JSStringRef string, char* buffer, size_t bufferSize);
+size_t JSStringGetUTF8CString(JSStringRef string, char* buffer, size_t bufferSize);
 
 /*!
 @function
@@ -126,7 +126,7 @@ JS_EXPORT size_t JSStringGetUTF8CString(JSStringRef string, char* buffer, size_t
 @param b      The second JSString to test.
 @result       true if the two strings match, otherwise false.
 */
-JS_EXPORT bool JSStringIsEqual(JSStringRef a, JSStringRef b);
+bool JSStringIsEqual(JSStringRef a, JSStringRef b);
 /*!
 @function
 @abstract     Tests whether a JavaScript string matches a null-terminated UTF8 string.
@@ -134,8 +134,30 @@ JS_EXPORT bool JSStringIsEqual(JSStringRef a, JSStringRef b);
 @param b      The null-terminated UTF8 string to test.
 @result       true if the two strings match, otherwise false.
 */
-JS_EXPORT bool JSStringIsEqualToUTF8CString(JSStringRef a, const char* b);
+bool JSStringIsEqualToUTF8CString(JSStringRef a, const char* b);
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+// CFString convenience methods
+/*!
+@function
+@abstract         Creates a JavaScript string from a CFString.
+@discussion       This function is optimized to take advantage of cases when 
+ CFStringGetCharactersPtr returns a valid pointer.
+@param string     The CFString to copy into the new JSString.
+@result           A JSString containing string. Ownership follows the Create Rule.
+*/
+JSStringRef JSStringCreateWithCFString(CFStringRef string);
+/*!
+@function
+@abstract         Creates a CFString from a JavaScript string.
+@param alloc      The alloc parameter to pass to CFStringCreate.
+@param string     The JSString to copy into the new CFString.
+@result           A CFString containing string. Ownership follows the Create Rule.
+*/
+CFStringRef JSStringCopyCFString(CFAllocatorRef alloc, JSStringRef string);
+#endif // __APPLE__
+    
 #ifdef __cplusplus
 }
 #endif

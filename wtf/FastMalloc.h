@@ -1,5 +1,7 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- *  Copyright (C) 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ *  This file is part of the KDE libraries
+ *  Copyright (C) 2005 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -18,60 +20,37 @@
  *
  */
 
-#ifndef WTF_FastMalloc_h
-#define WTF_FastMalloc_h
+#ifndef KXMLCORE_FAST_MALLOC_H
+#define KXMLCORE_FAST_MALLOC_H
 
-#include "Platform.h"
 #include <stdlib.h>
 #include <new>
 
 namespace WTF {
 
     void *fastMalloc(size_t n);
-    void *fastZeroedMalloc(size_t n);
     void *fastCalloc(size_t n_elements, size_t element_size);
     void fastFree(void* p);
     void *fastRealloc(void* p, size_t n);
 
-#ifndef NDEBUG    
-    void fastMallocForbid();
-    void fastMallocAllow();
-#endif
-
-    void releaseFastMallocFreeMemory();
-
 } // namespace WTF
 
 using WTF::fastMalloc;
-using WTF::fastZeroedMalloc;
 using WTF::fastCalloc;
 using WTF::fastRealloc;
 using WTF::fastFree;
 
-#ifndef NDEBUG    
-using WTF::fastMallocForbid;
-using WTF::fastMallocAllow;
-#endif
-
-#if COMPILER(GCC) && PLATFORM(DARWIN)
-#define WTF_PRIVATE_INLINE __private_extern__ inline __attribute__((always_inline))
-#elif COMPILER(GCC)
-#define WTF_PRIVATE_INLINE inline __attribute__((always_inline))
-#elif COMPILER(MSVC)
-#define WTF_PRIVATE_INLINE __forceinline
+#if PLATFORM(GCC) && PLATFORM(DARWIN)
+#define KXMLCORE_PRIVATE_INLINE __private_extern__ inline __attribute__((always_inline))
+#elif PLATFORM(GCC)
+#define KXMLCORE_PRIVATE_INLINE inline __attribute__((always_inline))
 #else
-#define WTF_PRIVATE_INLINE inline
+#define KXMLCORE_PRIVATE_INLINE inline
 #endif
 
-#ifndef _CRTDBG_MAP_ALLOC
+KXMLCORE_PRIVATE_INLINE void* operator new(size_t s) { return fastMalloc(s); }
+KXMLCORE_PRIVATE_INLINE void operator delete(void* p) { fastFree(p); }
+KXMLCORE_PRIVATE_INLINE void* operator new[](size_t s) { return fastMalloc(s); }
+KXMLCORE_PRIVATE_INLINE void operator delete[](void* p) { fastFree(p); }
 
-#if !defined(USE_SYSTEM_MALLOC) || !(USE_SYSTEM_MALLOC)
-WTF_PRIVATE_INLINE void* operator new(size_t s) { return fastMalloc(s); }
-WTF_PRIVATE_INLINE void operator delete(void* p) { fastFree(p); }
-WTF_PRIVATE_INLINE void* operator new[](size_t s) { return fastMalloc(s); }
-WTF_PRIVATE_INLINE void operator delete[](void* p) { fastFree(p); }
-#endif
-
-#endif // _CRTDBG_MAP_ALLOC
-
-#endif /* WTF_FastMalloc_h */
+#endif /* KXMLCORE_FAST_MALLOC_H */

@@ -22,21 +22,25 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
+#if BINDINGS
 
 #include "config.h"
 #include "runtime_array.h"
 
-#include "JSGlobalObject.h"
-#include "array_object.h"
-
 using namespace KJS;
 
-const ClassInfo RuntimeArray::info = { "RuntimeArray", &ArrayInstance::info, 0 };
+const ClassInfo RuntimeArray::info = {"RuntimeArray", &ArrayInstance::info, 0, 0};
 
 RuntimeArray::RuntimeArray(ExecState *exec, Bindings::Array *a)
-    : JSObject(exec->lexicalGlobalObject()->arrayPrototype())
-    , _array(a)
+    : ArrayInstance(exec->lexicalInterpreter()->builtinArrayPrototype(), a->getLength())
 {
+    // Always takes ownership of concrete array.
+    _array = a;
+}
+
+RuntimeArray::~RuntimeArray()
+{
+    delete _array;
 }
 
 JSValue *RuntimeArray::lengthGetter(ExecState*, JSObject*, const Identifier&, const PropertySlot& slot)
@@ -51,9 +55,9 @@ JSValue *RuntimeArray::indexGetter(ExecState* exec, JSObject*, const Identifier&
     return thisObj->getConcreteArray()->valueAt(exec, slot.index());
 }
 
-bool RuntimeArray::getOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
+bool RuntimeArray::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot& slot)
 {
-    if (propertyName == exec->propertyNames().length) {
+    if (propertyName == lengthPropertyName) {
         slot.setCustom(this, lengthGetter);
         return true;
     }
@@ -67,7 +71,7 @@ bool RuntimeArray::getOwnPropertySlot(ExecState* exec, const Identifier& propert
         }
     }
     
-    return JSObject::getOwnPropertySlot(exec, propertyName, slot);
+    return ArrayInstance::getOwnPropertySlot(exec, propertyName, slot);
 }
 
 bool RuntimeArray::getOwnPropertySlot(ExecState *exec, unsigned index, PropertySlot& slot)
@@ -77,12 +81,12 @@ bool RuntimeArray::getOwnPropertySlot(ExecState *exec, unsigned index, PropertyS
         return true;
     }
     
-    return JSObject::getOwnPropertySlot(exec, index, slot);
+    return ArrayInstance::getOwnPropertySlot(exec, index, slot);
 }
 
-void RuntimeArray::put(ExecState* exec, const Identifier& propertyName, JSValue* value, int attr)
+void RuntimeArray::put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr)
 {
-    if (propertyName == exec->propertyNames().length) {
+    if (propertyName == lengthPropertyName) {
         throwError(exec, RangeError);
         return;
     }
@@ -116,3 +120,5 @@ bool RuntimeArray::deleteProperty(ExecState*, unsigned)
 {
     return false;
 }
+
+#endif //BINDINGS

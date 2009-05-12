@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <!-- 
-Copyright (C) 2007 Kevin Ollivier. All rights reserved.
+Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
@@ -26,41 +26,48 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-JavaScriptCore Bakefile project file.
+JavaScriptCore Bakefile project file. 
 -->
 
-<makefile>
-    <set var="SRCDIR">.</set>
 
-    <include file="../WebKit/wx/wxwk-settings.bkl"/>
+
+<makefile>
+
+    <set var="SRCDIR">.</set>
+    <!-- Common definitions etc.: -->
+    <include file="../Bakefiles/presets.bkl"/>
     <include file="JavaScriptCoreSources.bkl"/>
-    
+
+
     <set var="BUILDDIR">obj-$(FORMAT)</set>
 
-    <template id="jscore_base" template="icu,pthreads,wxwk_build_settings">
-        <sources>
-            $(JSCORE_SOURCES_API)
-            $(JSCORE_SOURCES_BINDINGS)
-            $(JSCORE_SOURCES_KJS)
-            $(JSCORE_SOURCES_PCRE)
-            $(WTF_SOURCES)
-        </sources>
-        <install-to>$(WKOUTPUTDIR)</install-to>
+    <template id="jscore_base" template="icu">
         <pic>on</pic>
         <threading>multi</threading>
-
+        <dirname>$(SRCDIR)</dirname>
+        
         <include>$(SRCDIR)</include>
-        <include>$(SRCDIR)/..</include>
-        <include>$(SRCDIR)/DerivedSources/JavaScriptCore</include>
         <include>$(SRCDIR)/ForwardingHeaders</include>
-        <include>$(SRCDIR)/bindings/c</include>
-        <include>$(SRCDIR)/bindings/jni</include>
-        <include>$(SRCDIR)/bindings</include>
         <include>$(SRCDIR)/kjs</include>
         <include>$(SRCDIR)/pcre</include>
-        <include>$(SRCDIR)/wtf</include>
+        <include>$(SRCDIR)/bindings</include>
+        <include>$(SRCDIR)/bindings/c</include>
+        <include>$(SRCDIR)/bindings/jni</include>
+        <include>$(SRCDIR)/kxmlcore</include>
+        <include>$(SRCDIR)/DerivedSources/JavaScriptCore</include>
 
-        <define>ENABLE_XSLT=1</define>
+        <define>APPLE_CHANGES=1</define>
+
+        <!-- this GC version requires Mach's thread suspend/resume: -->
+        <if cond="PLATFORM_MACOSX=='1'">
+            <define>USE_CONSERVATIVE_GC=0</define>
+        </if>
+        
+        <if cond="PLATFORM_MACOSX=='1'">
+            <define>USE_CONSERVATIVE_GC=1</define>
+        </if> 
+
+        <define>KHTML_XSLT=1</define>
 
         <if cond="FORMAT=='gnu'">
             <!-- FIXME: we need proper configure checks -->
@@ -76,39 +83,33 @@ JavaScriptCore Bakefile project file.
             <define>HAVE_FUNC__FINITE=1</define>
         </if>
 
-    </template>
-    
-    <exe id="testkjs" template="icu,jscore,pthreads">
-        <cxx-rtti>off</cxx-rtti>
-        <cxx-exceptions>off</cxx-exceptions>
-        <debug-info>on</debug-info>
-        <depends>jscore</depends>
-        <include>$(SRCDIR)</include>
-        <include>$(WK_ROOT)/JavaScriptCore</include>
-        <include>$(WK_ROOT)/JavaScriptCore/kjs</include>
-        <include>$(WK_ROOT)/JavaScriptCore/pcre</include>
-        <include>$(WK_ROOT)/JavaScriptCore/wtf</include>
-        <dirname>$(WKOUTPUTDIR)</dirname>
-        <sources>$(SRCDIR)/kjs/testkjs.cpp</sources>
-        <if cond="FORMAT=='gnu'">
-            <ldflags>$(WKOUTPUTDIR)/libjscore.a</ldflags>
-        </if>
-        <if cond="FORMAT in ['msvc','msvs2005prj']">
-            <include>$(WK_ROOT)/WebKitLibraries/win/include</include>
-            <sys-lib>jscore</sys-lib>
-            <sys-lib>winmm</sys-lib> <!-- for timeGetTime -->
-            <lib-path>$(WKOUTPUTDIR)</lib-path>
-            <lib-path>$(WK_ROOT)/WebKitLibraries/win/lib</lib-path>
-        </if>
-        
+    </template>   
+
+    <exe id="dftables">
+        <dirname>$(SRCDIR)</dirname>
+        <sources>$(SRCDIR)/pcre/dftables.c</sources>
     </exe>
 
     <action id="DerivedSources">
-        <is-phony />
+        <is-phony/>
         <command>bash make-generated-sources.sh</command>
     </action>
 
     <lib id="jscore" template="jscore_base">
-
+        <objects-depend>dftables</objects-depend>
+        <pre-build-target>DerivedSources</pre-build-target>
+        <sources>
+			$(JSCORE_SOURCES_WTF)
+            $(JSCORE_SOURCES_PCRE)
+            $(JSCORE_SOURCES_KJS)
+        </sources>
+        <if cond="PLATFORM_WIN32=='1'">
+            $(JSCORE_SOURCES_WIN)
+		</if>
+		<install-to>$(BUILDDIR)</install-to>
     </lib>
+
 </makefile>
+
+
+

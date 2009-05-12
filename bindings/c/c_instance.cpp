@@ -24,9 +24,6 @@
  */
 
 #include "config.h"
-
-#if ENABLE(NETSCAPE_API)
-
 #include "c_instance.h"
 
 #include "c_class.h"
@@ -34,25 +31,41 @@
 #include "c_utility.h"
 #include "list.h"
 #include "npruntime_impl.h"
-#include "PropertyNameArray.h"
-#include "runtime_root.h"
-#include <wtf/Assertions.h>
-#include <wtf/StringExtras.h>
 #include <wtf/Vector.h>
 
 namespace KJS {
 namespace Bindings {
 
-CInstance::CInstance(NPObject* o, PassRefPtr<RootObject> rootObject)
-    : Instance(rootObject)
+CInstance::CInstance(NPObject* o) 
 {
     _object = _NPN_RetainObject(o);
     _class = 0;
+    setExecutionContext(0);
 }
 
 CInstance::~CInstance() 
 {
     _NPN_ReleaseObject(_object);
+}
+
+CInstance::CInstance(const CInstance &other) : Instance()
+{
+    _object = _NPN_RetainObject(other._object);
+    _class = 0;
+    setExecutionContext(other.executionContext());
+}
+
+CInstance &CInstance::operator=(const CInstance& other)
+{
+    if (this == &other)
+        return *this;
+
+    NPObject* _oldObject = _object;
+    _object = _NPN_RetainObject(other._object);
+    _NPN_ReleaseObject(_oldObject);
+    _class = 0;
+
+    return *this;
 }
 
 Class *CInstance::getClass() const
@@ -81,9 +94,9 @@ JSValue* CInstance::invokeMethod(ExecState* exec, const MethodList& methodList, 
 {
     // Overloading methods are not allowed by NPObjects.  Should only be one
     // name match for a particular method.
-    ASSERT(methodList.size() == 1);
+    assert(methodList.length() == 1);
 
-    CMethod* method = static_cast<CMethod*>(methodList[0]);
+    CMethod* method = static_cast<CMethod*>(methodList.methodAt(0));
 
     NPIdentifier ident = _NPN_GetStringIdentifier(method->name());
     if (!_object->_class->hasMethod(_object, ident))
@@ -99,16 +112,12 @@ JSValue* CInstance::invokeMethod(ExecState* exec, const MethodList& methodList, 
     // Invoke the 'C' method.
     NPVariant resultVariant;
     VOID_TO_NPVARIANT(resultVariant);
-
-    {
-       JSLock::DropAllLocks dropAllLocks;
-        _object->_class->invoke(_object, ident, cArgs.data(), count, &resultVariant);
-    }
+    _object->_class->invoke(_object, ident, cArgs, count, &resultVariant);
 
     for (i = 0; i < count; i++)
         _NPN_ReleaseVariantValue(&cArgs[i]);
 
-    JSValue* resultValue = convertNPVariantToValue(exec, &resultVariant, _rootObject.get());
+    JSValue* resultValue = convertNPVariantToValue(exec, &resultVariant);
     _NPN_ReleaseVariantValue(&resultVariant);
     return resultValue;
 }
@@ -129,15 +138,12 @@ JSValue* CInstance::invokeDefaultMethod(ExecState* exec, const List& args)
     // Invoke the 'C' method.
     NPVariant resultVariant;
     VOID_TO_NPVARIANT(resultVariant);
-    {
-       JSLock::DropAllLocks dropAllLocks;
-        _object->_class->invokeDefault(_object, cArgs.data(), count, &resultVariant);
-    }
-    
+    _object->_class->invokeDefault(_object, cArgs, count, &resultVariant);
+
     for (i = 0; i < count; i++)
         _NPN_ReleaseVariantValue(&cArgs[i]);
 
-    JSValue* resultValue = convertNPVariantToValue(exec, &resultVariant, _rootObject.get());
+    JSValue* resultValue = convertNPVariantToValue(exec, &resultVariant);
     _NPN_ReleaseVariantValue(&resultVariant);
     return resultValue;
 }
@@ -178,35 +184,5 @@ JSValue* CInstance::valueOf() const
     return stringValue();
 }
 
-void CInstance::getPropertyNames(ExecState*, PropertyNameArray& nameArray) 
-{
-    if (!NP_CLASS_STRUCT_VERSION_HAS_ENUM(_object->_class) ||
-        !_object->_class->enumerate)
-        return;
-
-    unsigned count;
-    NPIdentifier* identifiers;
-    
-    {
-        JSLock::DropAllLocks dropAllLocks;
-        if (!_object->_class->enumerate(_object, &identifiers, &count))
-            return;
-    }
-    
-    for (unsigned i = 0; i < count; i++) {
-        PrivateIdentifier* identifier = static_cast<PrivateIdentifier*>(identifiers[i]);
-        
-        if (identifier->isString)
-            nameArray.add(identifierFromNPIdentifier(identifier->value.string));
-        else
-            nameArray.add(Identifier::from(identifier->value.number));
-    }
-         
-    // FIXME: This should really call NPN_MemFree but that's in WebKit
-    free(identifiers);
-}
-
 }
 }
-
-#endif // ENABLE(NETSCAPE_API)

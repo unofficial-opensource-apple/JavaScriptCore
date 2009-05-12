@@ -20,8 +20,8 @@
  *
  */
 
-#ifndef WTF_VectorTraits_h
-#define WTF_VectorTraits_h
+#ifndef KXMLCORE_VECTOR_TRAITS_H
+#define KXMLCORE_VECTOR_TRAITS_H
 
 #include "RefPtr.h"
 #include <utility>
@@ -60,7 +60,6 @@ namespace WTF {
         static const bool canMoveWithMemcpy = false;
         static const bool canCopyWithMemcpy = false;
         static const bool canFillWithMemset = false;
-        static const bool canCompareWithMemcmp = false;
     };
 
     template<typename T>
@@ -72,7 +71,6 @@ namespace WTF {
         static const bool canMoveWithMemcpy = true;
         static const bool canCopyWithMemcpy = true;
         static const bool canFillWithMemset = sizeof(T) == sizeof(char);
-        static const bool canCompareWithMemcmp = true;
     };
 
     template<typename T>
@@ -86,7 +84,6 @@ namespace WTF {
         static const bool canMoveWithMemcpy = true;
         static const bool canCopyWithMemcpy = false;
         static const bool canFillWithMemset = false;
-        static const bool canCompareWithMemcmp = true;
     };
 
     // we know RefPtr is simple enough that initializing to 0 and moving with memcpy
@@ -106,7 +103,6 @@ namespace WTF {
         static const bool canMoveWithMemcpy = FirstTraits::canMoveWithMemcpy && SecondTraits::canMoveWithMemcpy;
         static const bool canCopyWithMemcpy = FirstTraits::canCopyWithMemcpy && SecondTraits::canCopyWithMemcpy;
         static const bool canFillWithMemset = false;
-        static const bool canCompareWithMemcmp = FirstTraits::canCompareWithMemcmp && SecondTraits::canCompareWithMemcmp;
     };
 
 } // namespace WTF
@@ -114,4 +110,4 @@ namespace WTF {
 using WTF::VectorTraits;
 using WTF::SimpleClassVectorTraits;
 
-#endif // WTF_VectorTraits_h
+#endif // KXMLCORE_VECTOR_TRAITS_H

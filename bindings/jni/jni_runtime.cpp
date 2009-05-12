@@ -23,10 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS_JAVA
+
 #include "config.h"
-
-#if ENABLE(JAVA_BINDINGS)
-
 #include <internal.h>
 #include <ustring.h>
 #include <value.h>
@@ -55,7 +54,7 @@ JavaParameter::JavaParameter (JNIEnv *env, jstring type)
 {
     _type = JavaString (env, type);
     _JNIType = JNITypeFromClassName (_type.UTF8String());
-}
+};
 
 JavaField::JavaField (JNIEnv *env, jobject aField)
 {
@@ -69,41 +68,41 @@ JavaField::JavaField (JNIEnv *env, jobject aField)
     jstring fieldName = (jstring)callJNIObjectMethod (aField, "getName", "()Ljava/lang/String;");
     _name = JavaString(env, fieldName);
 
-    _field = new JObjectWrapper(aField);
+    _field = new JavaInstance(aField, 0);
 }
 
-JSValue* JavaArray::convertJObjectToArray(ExecState* exec, jobject anObject, const char* type, PassRefPtr<RootObject> rootObject)
+JSValue *JavaArray::convertJObjectToArray (ExecState *exec, jobject anObject, const char *type, const RootObject *r)
 {
     if (type[0] != '[')
         return jsUndefined();
 
-    return new RuntimeArray(exec, new JavaArray((jobject)anObject, type, rootObject));
+    return new RuntimeArray(exec, new JavaArray((jobject)anObject, type, r));
 }
 
 jvalue JavaField::dispatchValueFromInstance(ExecState *exec, const JavaInstance *instance, const char *name, const char *sig, JNIType returnType) const
 {
     jobject jinstance = instance->javaInstance();
-    jobject fieldJInstance = _field->_instance;
+    jobject fieldJInstance = _field->javaInstance();
     JNIEnv *env = getJNIEnv();
     jvalue result;
 
     bzero (&result, sizeof(jvalue));
     jclass cls = env->GetObjectClass(fieldJInstance);
     if ( cls != NULL ) {
-        jmethodID mid = env->GetMethodID(cls, name, sig);
-        if ( mid != NULL )
-        {
-            RootObject* rootObject = instance->rootObject();
-            if (rootObject && rootObject->nativeHandle()) {
-                JSValue *exceptionDescription = NULL;
-                jvalue args[1];
-                
-                args[0].l = jinstance;
-                dispatchJNICall(rootObject->nativeHandle(), fieldJInstance, false, returnType, mid, args, result, 0, exceptionDescription);
-                if (exceptionDescription)
-                    throwError(exec, GeneralError, exceptionDescription->toString(exec));
-            }
-        }
+	jmethodID mid = env->GetMethodID(cls, name, sig);
+	if ( mid != NULL )
+	{
+	    const RootObject *execContext = instance->executionContext();
+	    if (execContext && execContext->nativeHandle()) {
+		JSValue *exceptionDescription = NULL;
+		jvalue args[1];
+		
+		args[0].l = jinstance;
+		dispatchJNICall (execContext->nativeHandle(), fieldJInstance, false, returnType, mid, args, result, 0, exceptionDescription);
+		if (exceptionDescription)
+		    throwError(exec, GeneralError, exceptionDescription->toString(exec));
+	    }
+	}
     }
     return result;
 }
@@ -115,17 +114,16 @@ JSValue *JavaField::valueFromInstance(ExecState *exec, const Instance *i) const
     JSValue *jsresult = jsUndefined();
     
     switch (_JNIType) {
-        case array_type:
         case object_type: {
-            jvalue result = dispatchValueFromInstance (exec, instance, "get", "(Ljava/lang/Object;)Ljava/lang/Object;", object_type);
-            jobject anObject = result.l;
+	    jvalue result = dispatchValueFromInstance (exec, instance, "get", "(Ljava/lang/Object;)Ljava/lang/Object;", object_type);
+	    jobject anObject = result.l;
 
             const char *arrayType = type();
             if (arrayType[0] == '[') {
-                jsresult = JavaArray::convertJObjectToArray(exec, anObject, arrayType, instance->rootObject());
+                jsresult = JavaArray::convertJObjectToArray (exec, anObject, arrayType, instance->executionContext());
             }
             else if (anObject != 0){
-                jsresult = Instance::createRuntimeObject(Instance::JavaLanguage, anObject, instance->rootObject());
+		jsresult = Instance::createRuntimeObject(Instance::JavaLanguage, anObject, instance->executionContext());
             }
         }
         break;
@@ -140,18 +138,18 @@ JSValue *JavaField::valueFromInstance(ExecState *exec, const Instance *i) const
         
         case int_type: {
             jint value;
-            jvalue result = dispatchValueFromInstance (exec, instance, "getInt", "(Ljava/lang/Object;)I", int_type);
-            value = result.i;
+	    jvalue result = dispatchValueFromInstance (exec, instance, "getInt", "(Ljava/lang/Object;)I", int_type);
+	    value = result.i;
             jsresult = jsNumber((int)value);
-        }
-        break;
+	}
+	break;
 
         case long_type:
         case float_type:
         case double_type: {
             jdouble value;
-            jvalue result = dispatchValueFromInstance (exec, instance, "getDouble", "(Ljava/lang/Object;)D", double_type);
-            value = result.i;
+	    jvalue result = dispatchValueFromInstance (exec, instance, "getDouble", "(Ljava/lang/Object;)D", double_type);
+	    value = result.i;
             jsresult = jsNumber((double)value);
         }
         break;
@@ -167,27 +165,27 @@ JSValue *JavaField::valueFromInstance(ExecState *exec, const Instance *i) const
 void JavaField::dispatchSetValueToInstance(ExecState *exec, const JavaInstance *instance, jvalue javaValue, const char *name, const char *sig) const
 {
     jobject jinstance = instance->javaInstance();
-    jobject fieldJInstance = _field->_instance;
+    jobject fieldJInstance = _field->javaInstance();
     JNIEnv *env = getJNIEnv();
 
     jclass cls = env->GetObjectClass(fieldJInstance);
     if ( cls != NULL ) {
-        jmethodID mid = env->GetMethodID(cls, name, sig);
-        if ( mid != NULL )
-        {
-            RootObject* rootObject = instance->rootObject();
-            if (rootObject && rootObject->nativeHandle()) {
-                JSValue *exceptionDescription = NULL;
-                jvalue args[2];
-                jvalue result;
-                
-                args[0].l = jinstance;
-                args[1] = javaValue;
-                dispatchJNICall(rootObject->nativeHandle(), fieldJInstance, false, void_type, mid, args, result, 0, exceptionDescription);
-                if (exceptionDescription)
-                    throwError(exec, GeneralError, exceptionDescription->toString(exec));
-            }
-        }
+	jmethodID mid = env->GetMethodID(cls, name, sig);
+	if ( mid != NULL )
+	{
+	    const RootObject *execContext = instance->executionContext();
+	    if (execContext && execContext->nativeHandle()) {
+		JSValue *exceptionDescription = NULL;
+		jvalue args[2];
+		jvalue result;
+		
+		args[0].l = jinstance;
+		args[1] = javaValue;
+		dispatchJNICall (execContext->nativeHandle(), fieldJInstance, false, void_type, mid, args, result, 0, exceptionDescription);
+		if (exceptionDescription)
+		    throwError(exec, GeneralError, exceptionDescription->toString(exec));
+	    }
+	}
     }
 }
 
@@ -199,53 +197,69 @@ void JavaField::setValueToInstance(ExecState *exec, const Instance *i, JSValue *
     JS_LOG ("setting value %s to %s\n", name(), aValue->toString(exec).ascii());
 
     switch (_JNIType) {
-        case array_type:
         case object_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "set", "(Ljava/lang/Object;Ljava/lang/Object;)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "set", "(Ljava/lang/Object;Ljava/lang/Object;)V");
         }
         break;
             
         case boolean_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setBoolean", "(Ljava/lang/Object;Z)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setBoolean", "(Ljava/lang/Object;Z)V");
         }
         break;
             
         case byte_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setByte", "(Ljava/lang/Object;B)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setByte", "(Ljava/lang/Object;B)V");
         }
         break;
 
         case char_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setChar", "(Ljava/lang/Object;C)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setChar", "(Ljava/lang/Object;C)V");
         }
         break;
 
         case short_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setShort", "(Ljava/lang/Object;S)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setShort", "(Ljava/lang/Object;S)V");
         }
         break;
 
         case int_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setInt", "(Ljava/lang/Object;I)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setInt", "(Ljava/lang/Object;I)V");
         }
         break;
 
         case long_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setLong", "(Ljava/lang/Object;J)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setLong", "(Ljava/lang/Object;J)V");
         }
         break;
 
         case float_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setFloat", "(Ljava/lang/Object;F)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setFloat", "(Ljava/lang/Object;F)V");
         }
         break;
 
         case double_type: {
-            dispatchSetValueToInstance (exec, instance, javaValue, "setDouble", "(Ljava/lang/Object;D)V");
+	    dispatchSetValueToInstance (exec, instance, javaValue, "setDouble", "(Ljava/lang/Object;D)V");
         }
         break;
         default:
         break;
+    }
+}
+
+JavaConstructor::JavaConstructor (JNIEnv *env, jobject aConstructor)
+{
+    // Get parameters
+    jarray jparameters = (jarray)callJNIObjectMethod (aConstructor, "getParameterTypes", "()[Ljava/lang/Class;");
+    _numParameters = env->GetArrayLength (jparameters);
+    _parameters = new JavaParameter[_numParameters];
+    
+    int i;
+    for (i = 0; i < _numParameters; i++) {
+        jobject aParameter = env->GetObjectArrayElement ((jobjectArray)jparameters, i);
+        jstring parameterName = (jstring)callJNIObjectMethod (aParameter, "getName", "()Ljava/lang/String;");
+        _parameters[i] = JavaParameter(env, parameterName);
+        env->DeleteLocalRef (aParameter);
+        env->DeleteLocalRef (parameterName);
     }
 }
 
@@ -288,19 +302,10 @@ JavaMethod::JavaMethod (JNIEnv *env, jobject aMethod)
     _isStatic = (bool)callJNIStaticBooleanMethod (modifierClass, "isStatic", "(I)Z", modifiers);
 }
 
-JavaMethod::~JavaMethod() 
-{
-    if (_signature)
-        free(_signature);
-    delete [] _parameters;
-};
-
 // JNI method signatures use '/' between components of a class name, but
 // we get '.' between components from the reflection API.
-static void appendClassName(UString& aString, const char* className)
+static void appendClassName (UString *aString, const char *className)
 {
-    ASSERT(JSLock::lockCount() > 0);
-    
     char *result, *cp = strdup(className);
     
     result = cp;
@@ -310,47 +315,42 @@ static void appendClassName(UString& aString, const char* className)
         cp++;
     }
         
-    aString.append(result);
+    aString->append(result);
 
     free (result);
 }
 
 const char *JavaMethod::signature() const 
 {
-    if (!_signature) {
-        JSLock lock;
-
-        UString signatureBuilder("(");
-        for (int i = 0; i < _numParameters; i++) {
-            JavaParameter* aParameter = parameterAt(i);
+    if (_signature == 0){
+        int i;
+        
+        _signature = new UString("(");
+        for (i = 0; i < _numParameters; i++) {
+            JavaParameter *aParameter = static_cast<JavaParameter *>(parameterAt(i));
             JNIType _JNIType = aParameter->getJNIType();
-            if (_JNIType == array_type)
-                appendClassName(signatureBuilder, aParameter->type());
-            else {
-                signatureBuilder.append(signatureFromPrimitiveType(_JNIType));
-                if (_JNIType == object_type) {
-                    appendClassName(signatureBuilder, aParameter->type());
-                    signatureBuilder.append(";");
-                }
+            _signature->append(signatureFromPrimitiveType (_JNIType));
+            if (_JNIType == object_type) {
+                appendClassName (_signature, aParameter->type());
+                _signature->append(";");
             }
         }
-        signatureBuilder.append(")");
+        _signature->append(")");
         
         const char *returnType = _returnType.UTF8String();
-        if (_JNIReturnType == array_type) {
-            appendClassName(signatureBuilder, returnType);
-        } else {
-            signatureBuilder.append(signatureFromPrimitiveType(_JNIReturnType));
+        if (returnType[0] == '[') {
+            appendClassName (_signature, returnType);
+        }
+        else {
+            _signature->append(signatureFromPrimitiveType (_JNIReturnType));
             if (_JNIReturnType == object_type) {
-                appendClassName(signatureBuilder, returnType);
-                signatureBuilder.append(";");
+                appendClassName (_signature, returnType);
+                _signature->append(";");
             }
         }
-        
-        _signature = strdup(signatureBuilder.ascii());
     }
     
-    return _signature;
+    return _signature->ascii();
 }
 
 JNIType JavaMethod::JNIReturnType() const
@@ -367,26 +367,27 @@ jmethodID JavaMethod::methodID (jobject obj) const
 }
 
 
-JavaArray::JavaArray(jobject array, const char* type, PassRefPtr<RootObject> rootObject)
-    : Array(rootObject)
+JavaArray::JavaArray (jobject a, const char *t, const RootObject *r) 
 {
-    _array = new JObjectWrapper(array);
+    _array = new JObjectWrapper (a);
     // Java array are fixed length, so we can cache length.
     JNIEnv *env = getJNIEnv();
     _length = env->GetArrayLength((jarray)_array->_instance);
-    _type = strdup(type);
-    _rootObject = rootObject;
-}
+    _type = strdup(t);
+    _root = r;
+};
 
 JavaArray::~JavaArray () 
 {
     free ((void *)_type);
 }
 
-RootObject* JavaArray::rootObject() const 
-{ 
-    return _rootObject && _rootObject->isValid() ? _rootObject.get() : 0;
-}
+
+JavaArray::JavaArray (const JavaArray &other) : Array() 
+{
+    _array = other._array;
+    _type = strdup(other._type);
+};
 
 void JavaArray::setValueAt(ExecState *exec, unsigned int index, JSValue *aValue) const
 {
@@ -473,10 +474,10 @@ JSValue *JavaArray::valueAt(ExecState *exec, unsigned int index) const
             
             // Nested array?
             if (_type[1] == '[') {
-                return JavaArray::convertJObjectToArray(exec, anObject, _type+1, rootObject());
+                return JavaArray::convertJObjectToArray (exec, anObject, _type+1, executionContext());
             }
             // or array of other object type?
-            return Instance::createRuntimeObject(Instance::JavaLanguage, anObject, rootObject());
+            return Instance::createRuntimeObject(Instance::JavaLanguage, anObject, executionContext());
         }
             
         case boolean_type: {
@@ -546,4 +547,5 @@ unsigned int JavaArray::getLength() const
     return _length;
 }
 
-#endif // ENABLE(JAVA_BINDINGS)
+
+#endif //BINDINGS_JAVA

@@ -23,9 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
+#if BINDINGS_JAVA
 
-#if ENABLE(JAVA_BINDINGS)
+#include "config.h"
 
 #include "jni_class.h"
 #include "jni_instance.h"
@@ -42,16 +42,16 @@
     fprintf(stderr, formatAndArgs); \
 }
 #endif
- 
+
 using namespace KJS::Bindings;
 using namespace KJS;
 
-JavaInstance::JavaInstance (jobject instance, PassRefPtr<RootObject> rootObject)
-    : Instance(rootObject)
+JavaInstance::JavaInstance (jobject instance, const RootObject *r) 
 {
     _instance = new JObjectWrapper (instance);
     _class = 0;
-}
+    setExecutionContext (r);
+};
 
 JavaInstance::~JavaInstance () 
 {
@@ -79,8 +79,6 @@ Class *JavaInstance::getClass() const
 
 JSValue *JavaInstance::stringValue() const
 {
-    JSLock lock;
-    
     jstring stringValue = (jstring)callJNIObjectMethod (_instance->_instance, "toString", "()Ljava/lang/String;");
     JNIEnv *env = getJNIEnv();
     const jchar *c = getUCharactersFromJStringInEnv(env, stringValue);
@@ -107,16 +105,17 @@ JSValue *JavaInstance::invokeMethod (ExecState *exec, const MethodList &methodLi
     jvalue *jArgs;
     JSValue *resultValue;
     Method *method = 0;
-    size_t numMethods = methodList.size();
+    unsigned int numMethods = methodList.length();
     
     // Try to find a good match for the overloaded method.  The 
     // fundamental problem is that JavaScript doesn have the
     // notion of method overloading and Java does.  We could 
     // get a bit more sophisticated and attempt to does some
     // type checking as we as checking the number of parameters.
+    unsigned int methodIndex;
     Method *aMethod;
-    for (size_t methodIndex = 0; methodIndex < numMethods; methodIndex++) {
-        aMethod = methodList[methodIndex];
+    for (methodIndex = 0; methodIndex < numMethods; methodIndex++) {
+        aMethod = methodList.methodAt (methodIndex);
         if (aMethod->numParameters() == count) {
             method = aMethod;
             break;
@@ -137,26 +136,24 @@ JSValue *JavaInstance::invokeMethod (ExecState *exec, const MethodList &methodLi
         jArgs = 0;
         
     for (i = 0; i < count; i++) {
-        JavaParameter* aParameter = jMethod->parameterAt(i);
+        JavaParameter *aParameter = static_cast<JavaParameter *>(jMethod->parameterAt(i));
         jArgs[i] = convertValueToJValue (exec, args.at(i), aParameter->getJNIType(), aParameter->type());
         JS_LOG("arg[%d] = %s\n", i, args.at(i)->toString(exec).ascii());
     }
         
+
     jvalue result;
 
     // Try to use the JNI abstraction first, otherwise fall back to
     // nornmal JNI.  The JNI dispatch abstraction allows the Java plugin
     // to dispatch the call on the appropriate internal VM thread.
-    RootObject* rootObject = this->rootObject();
-    if (!rootObject)
-        return jsUndefined();
-
+    const RootObject *execContext = executionContext();
     bool handled = false;
-    if (rootObject->nativeHandle()) {
+    if (execContext && execContext->nativeHandle()) {
         jobject obj = _instance->_instance;
         JSValue *exceptionDescription = NULL;
         const char *callingURL = 0;  // FIXME, need to propagate calling URL to Java
-        handled = dispatchJNICall(rootObject->nativeHandle(), obj, jMethod->isStatic(), jMethod->JNIReturnType(), jMethod->methodID(obj), jArgs, result, callingURL, exceptionDescription);
+        handled = dispatchJNICall (execContext->nativeHandle(), obj, jMethod->isStatic(), jMethod->JNIReturnType(), jMethod->methodID(obj), jArgs, result, callingURL, exceptionDescription);
         if (exceptionDescription) {
             throwError(exec, GeneralError, exceptionDescription->toString(exec));
             free (jArgs);
@@ -236,10 +233,10 @@ JSValue *JavaInstance::invokeMethod (ExecState *exec, const MethodList &methodLi
             if (result.l != 0) {
                 const char *arrayType = jMethod->returnType();
                 if (arrayType[0] == '[') {
-                    resultValue = JavaArray::convertJObjectToArray(exec, result.l, arrayType, rootObject);
+                    resultValue = JavaArray::convertJObjectToArray (exec, result.l, arrayType, executionContext());
                 }
                 else {
-                    resultValue = Instance::createRuntimeObject(Instance::JavaLanguage, result.l, rootObject);
+                    resultValue = Instance::createRuntimeObject(Instance::JavaLanguage, result.l, executionContext());
                 }
             }
             else {
@@ -330,7 +327,7 @@ JSValue *JavaInstance::defaultValue (JSType hint) const
 JSValue *JavaInstance::valueOf() const 
 {
     return stringValue();
-}
+};
 
 JObjectWrapper::JObjectWrapper(jobject instance)
 : _refCount(0)
@@ -355,4 +352,4 @@ JObjectWrapper::~JObjectWrapper() {
     _env->DeleteGlobalRef (_instance);
 }
 
-#endif // ENABLE(JAVA_BINDINGS)
+#endif //BINDINGS_JAVA

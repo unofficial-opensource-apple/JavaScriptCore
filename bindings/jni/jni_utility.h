@@ -23,20 +23,15 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS_JAVA
+
 #ifndef _JNI_UTILITY_H_
 #define _JNI_UTILITY_H_
-
-#if ENABLE(JAVA_BINDINGS)
 
 #include <list.h>
 
 #include <JavaVM/jni.h>
 
-// The order of these items can not be modified as they are tightly
-// bound with the JVM on Mac OSX. If new types need to be added, they
-// should be added to the end. It is used in jni_obc.mm when calling
-// through to the JVM. Newly added items need to be made compatible
-// in that file.
 typedef enum {
     invalid_type = 0,
     void_type,
@@ -48,14 +43,14 @@ typedef enum {
     int_type,
     long_type,
     float_type,
-    double_type,
-    array_type
+    double_type
 } JNIType;
 
-namespace KJS {
+namespace KJS
+{
 
-namespace Bindings {
-
+namespace Bindings 
+{
 class JavaParameter;
 
 const char *getCharactersFromJString(jstring aJString);
@@ -111,7 +106,6 @@ jfloat callJNIFloatMethodIDA(jobject obj, jmethodID methodID, jvalue *args);
 jdouble callJNIDoubleMethodIDA(jobject obj, jmethodID methodID, jvalue *args);
 
 JavaVM *getJavaVM();
-void    setJavaVM(JavaVM *javaVM);
 JNIEnv *getJNIEnv();
 
 bool dispatchJNICall(const void *targetAppletView, jobject obj, bool isStatic, JNIType returnType, jmethodID methodID, jvalue *args, jvalue &result, const char *callingURL, JSValue *&exceptionDescription);
@@ -120,6 +114,6 @@ bool dispatchJNICall(const void *targetAppletView, jobject obj, bool isStatic, J
 
 } // namespace KJS
 
-#endif // ENABLE(JAVA_BINDINGS)
+#endif //BINDINGS_JAVA
 
-#endif // _JNI_UTILITY_H_
+#endif

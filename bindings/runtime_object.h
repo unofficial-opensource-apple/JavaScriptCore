@@ -23,20 +23,20 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #ifndef KJS_RUNTIME_OBJECT_H
 #define KJS_RUNTIME_OBJECT_H
 
 #include "runtime.h"
 #include "object.h"
 
-#include <wtf/Noncopyable.h>
-
 namespace KJS {
 
 class RuntimeObjectImp : public JSObject {
 public:
-    virtual ~RuntimeObjectImp();
-    
+    RuntimeObjectImp(Bindings::Instance *i);
+
     const ClassInfo *classInfo() const { return &info; }
 
     virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
@@ -46,21 +46,15 @@ public:
     virtual JSValue *defaultValue(ExecState *exec, JSType hint) const;
     virtual bool implementsCall() const;
     virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
-    virtual void getPropertyNames(ExecState*, PropertyNameArray&);
-
-    virtual void invalidate();
+    
     Bindings::Instance *getInternalInstance() const { return instance.get(); }
-    
-    static JSObject* throwInvalidAccessError(ExecState*);
-    
-    static const ClassInfo info;
 
-protected:
-    friend class Bindings::Instance;
-    RuntimeObjectImp(Bindings::Instance*); // Only allow Instances and derived classes to create us
+    static const ClassInfo info;
 
 private:
     RuntimeObjectImp(); // prevent default construction
+    RuntimeObjectImp(const RuntimeObjectImp& other); // prevent copying
+    RuntimeObjectImp& operator=(const RuntimeObjectImp& other); // ditto
     
     static JSValue *fallbackObjectGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
     static JSValue *fieldGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
@@ -72,3 +66,5 @@ private:
 } // namespace
 
 #endif
+
+#endif // BINDINGS

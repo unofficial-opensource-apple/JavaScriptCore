@@ -22,23 +22,22 @@
 
 #include "config.h"
 #include "debugger.h"
-
-#include "JSGlobalObject.h"
-#include "internal.h"
 #include "ustring.h"
+
+#include "internal.h"
 
 using namespace KJS;
 
 // ------------------------------ Debugger -------------------------------------
 
 namespace KJS {
-  struct AttachedGlobalObject
+  struct AttachedInterpreter
   {
   public:
-    AttachedGlobalObject(JSGlobalObject* o, AttachedGlobalObject* ai) : globalObj(o), next(ai) { ++Debugger::debuggersPresent; }
-    ~AttachedGlobalObject() { --Debugger::debuggersPresent; }
-    JSGlobalObject* globalObj;
-    AttachedGlobalObject* next;
+    AttachedInterpreter(Interpreter *i, AttachedInterpreter *ai) : interp(i), next(ai) { ++Debugger::debuggersPresent; }
+    ~AttachedInterpreter() { --Debugger::debuggersPresent; }
+    Interpreter *interp;
+    AttachedInterpreter *next;
   };
 
 }
@@ -56,77 +55,64 @@ Debugger::~Debugger()
   delete rep;
 }
 
-void Debugger::attach(JSGlobalObject* globalObject)
+void Debugger::attach(Interpreter* interp)
 {
-  Debugger* other = globalObject->debugger();
+  Debugger *other = interp->debugger();
   if (other == this)
     return;
   if (other)
-    other->detach(globalObject);
-  globalObject->setDebugger(this);
-  rep->globalObjects = new AttachedGlobalObject(globalObject, rep->globalObjects);
+    other->detach(interp);
+  interp->setDebugger(this);
+  rep->interps = new AttachedInterpreter(interp, rep->interps);
 }
 
-void Debugger::detach(JSGlobalObject* globalObj)
+void Debugger::detach(Interpreter* interp)
 {
-  // iterate the addresses where AttachedGlobalObject pointers are stored
+  // iterate the addresses where AttachedInterpreter pointers are stored
   // so we can unlink items from the list
-  AttachedGlobalObject **p = &rep->globalObjects;
-  AttachedGlobalObject *q;
+  AttachedInterpreter **p = &rep->interps;
+  AttachedInterpreter *q;
   while ((q = *p)) {
-    if (!globalObj || q->globalObj == globalObj) {
+    if (!interp || q->interp == interp) {
       *p = q->next;
-      q->globalObj->setDebugger(0);
+      q->interp->setDebugger(0);
       delete q;
     } else
       p = &q->next;
   }
-
-  if (globalObj)
-    latestExceptions.remove(globalObj);
-  else
-    latestExceptions.clear();
 }
 
-bool Debugger::hasHandledException(ExecState *exec, JSValue *exception)
-{
-    if (latestExceptions.get(exec->dynamicGlobalObject()).get() == exception)
-        return true;
-
-    latestExceptions.set(exec->dynamicGlobalObject(), exception);
-    return false;
-}
-
-bool Debugger::sourceParsed(ExecState*, const SourceCode&, int /*errorLine*/, const UString& /*errorMsg*/)
+bool Debugger::sourceParsed(ExecState */*exec*/, int /*sourceId*/, const UString &/*sourceURL*/, 
+                           const UString &/*source*/, int /*startingLineNumber*/, int /*errorLine*/, const UString & /*errorMsg*/)
 {
   return true;
 }
 
-bool Debugger::sourceUnused(ExecState*, intptr_t /*sourceID*/)
+bool Debugger::sourceUnused(ExecState */*exec*/, int /*sourceId*/)
 {
   return true;
 }
 
-bool Debugger::exception(ExecState*, intptr_t /*sourceID*/, int /*lineno*/,
-                         JSValue* /*exception */)
+bool Debugger::exception(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
+                         JSObject */*exceptionObj*/)
 {
   return true;
 }
 
-bool Debugger::atStatement(ExecState*, intptr_t /*sourceID*/, int /*firstLine*/,
+bool Debugger::atStatement(ExecState */*exec*/, int /*sourceId*/, int /*firstLine*/,
                            int /*lastLine*/)
 {
   return true;
 }
 
-bool Debugger::callEvent(ExecState*, intptr_t /*sourceID*/, int /*lineno*/,
-                         JSObject* /*function*/, const List &/*args*/)
+bool Debugger::callEvent(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
+                         JSObject */*function*/, const List &/*args*/)
 {
   return true;
 }
 
-bool Debugger::returnEvent(ExecState*, intptr_t /*sourceID*/, int /*lineno*/,
-                           JSObject* /*function*/)
+bool Debugger::returnEvent(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
+                           JSObject */*function*/)
 {
   return true;
 }

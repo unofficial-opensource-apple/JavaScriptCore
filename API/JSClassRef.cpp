@@ -1,6 +1,6 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,23 +24,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
-#include "JSClassRef.h"
-
 #include "APICast.h"
 #include "JSCallbackObject.h"
+#include "JSClassRef.h"
 #include "JSObjectRef.h"
-#include <kjs/JSGlobalObject.h>
-#include <kjs/identifier.h>
-#include <kjs/object_object.h>
+#include "identifier.h"
 
 using namespace KJS;
 
 const JSClassDefinition kJSClassDefinitionEmpty = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 OpaqueJSClass::OpaqueJSClass(const JSClassDefinition* definition, OpaqueJSClass* protoClass) 
-    // FIXME: <rdar://problem/4949018>
-    : className(definition->className)
+    : refCount(0)
+    , className(definition->className)
     , parentClass(definition->parentClass)
     , prototypeClass(0)
     , staticValues(0)
@@ -56,22 +52,19 @@ OpaqueJSClass::OpaqueJSClass(const JSClassDefinition* definition, OpaqueJSClass*
     , callAsConstructor(definition->callAsConstructor)
     , hasInstance(definition->hasInstance)
     , convertToType(definition->convertToType)
-    , cachedPrototype(0)
 {
-    if (const JSStaticValue* staticValue = definition->staticValues) {
+    if (JSStaticValue* staticValue = definition->staticValues) {
         staticValues = new StaticValuesTable();
         while (staticValue->name) {
-            // FIXME: <rdar://problem/4949018>
             staticValues->add(Identifier(staticValue->name).ustring().rep(), 
                               new StaticValueEntry(staticValue->getProperty, staticValue->setProperty, staticValue->attributes));
             ++staticValue;
         }
     }
     
-    if (const JSStaticFunction* staticFunction = definition->staticFunctions) {
+    if (JSStaticFunction* staticFunction = definition->staticFunctions) {
         staticFunctions = new StaticFunctionsTable();
         while (staticFunction->name) {
-            // FIXME: <rdar://problem/4949018>
             staticFunctions->add(Identifier(staticFunction->name).ustring().rep(), 
                                  new StaticFunctionEntry(staticFunction->callAsFunction, staticFunction->attributes));
             ++staticFunction;
@@ -98,7 +91,7 @@ OpaqueJSClass::~OpaqueJSClass()
         JSClassRelease(prototypeClass);
 }
 
-JSClassRef OpaqueJSClass::createNoAutomaticPrototype(const JSClassDefinition* definition)
+JSClassRef OpaqueJSClass::createNoPrototype(const JSClassDefinition* definition)
 {
     return new OpaqueJSClass(definition, 0);
 }
@@ -112,14 +105,14 @@ void clearReferenceToPrototype(JSObjectRef prototype)
 
 JSClassRef OpaqueJSClass::create(const JSClassDefinition* definition)
 {
-    if (const JSStaticFunction* staticFunctions = definition->staticFunctions) {
+    if (JSStaticFunction* staticFunctions = definition->staticFunctions) {
         // copy functions into a prototype class
         JSClassDefinition protoDefinition = kJSClassDefinitionEmpty;
         protoDefinition.staticFunctions = staticFunctions;
         protoDefinition.finalize = clearReferenceToPrototype;
         OpaqueJSClass* protoClass = new OpaqueJSClass(&protoDefinition, 0);
 
-        // remove functions from the original class
+        // remove functions from the original definition
         JSClassDefinition objectDefinition = *definition;
         objectDefinition.staticFunctions = 0;
         return new OpaqueJSClass(&objectDefinition, protoClass);
@@ -157,8 +150,8 @@ JSObject* OpaqueJSClass::prototype(JSContextRef ctx)
         if (parentClass)
             parentPrototype = parentClass->prototype(ctx); // can be null
         if (!parentPrototype)
-            parentPrototype = exec->dynamicGlobalObject()->objectPrototype();
-        cachedPrototype = new JSCallbackObject<JSObject>(exec, prototypeClass, parentPrototype, this); // set ourself as the object's private data, so it can clear our reference on destruction
+            parentPrototype = exec->dynamicInterpreter()->builtinObjectPrototype();
+        cachedPrototype = new JSCallbackObject(exec, prototypeClass, parentPrototype, this); // set ourself as the object's private data, so it can clear our reference on destruction
     }
     return cachedPrototype;
 }

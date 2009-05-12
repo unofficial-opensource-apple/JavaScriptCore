@@ -26,17 +26,16 @@
 #ifndef JAVASCRIPTCORE_BINDINGS_RUNTIME_H
 #define JAVASCRIPTCORE_BINDINGS_RUNTIME_H
 
+#if BINDINGS
+
 #include "value.h"
 
-#include <wtf/Noncopyable.h>
-#include <wtf/HashMap.h>
-#include <wtf/Vector.h>
+#include <CoreFoundation/CFDictionary.h>
 
 namespace KJS  {
 
 class Identifier;
 class List;
-class PropertyNameArray;
 
 namespace Bindings {
 
@@ -44,12 +43,34 @@ class Instance;
 class Method;
 class RootObject;
 
-typedef Vector<Method*> MethodList;
+// For now just use Java style type descriptors.
+typedef const char * RuntimeType;
+
+// FIXME:  Parameter should be removed from abstract runtime classes.
+class Parameter
+{
+public:
+    virtual RuntimeType type() const = 0;
+    virtual ~Parameter() {}
+};
+
+// FIXME:  Constructor should be removed from abstract runtime classes
+// unless we want to support instantiation of runtime objects from
+// JavaScript.
+class Constructor
+{
+public:
+    virtual Parameter* parameterAt(int i) const = 0;
+    virtual int numParameters() const = 0;
+
+    virtual ~Constructor() {}
+};
 
 class Field
 {
 public:
     virtual const char* name() const = 0;
+    virtual RuntimeType type() const = 0;
 
     virtual JSValue* valueFromInstance(ExecState*, const Instance*) const = 0;
     virtual void setValueToInstance(ExecState*, const Instance*, JSValue*) const = 0;
@@ -57,7 +78,26 @@ public:
     virtual ~Field() {}
 };
 
-class Method : Noncopyable
+class MethodList
+{
+public:
+    MethodList() : _methods(0), _length(0) {}
+    
+    void addMethod(Method*);
+    unsigned int length() const;
+    Method* methodAt(unsigned int index) const;
+    
+    ~MethodList();
+    
+    MethodList(const MethodList&);
+    MethodList& operator=(const MethodList&);
+
+private:
+    Method **_methods;
+    unsigned int _length;
+};
+
+class Method
 {
 public:
     virtual const char *name() const = 0;
@@ -67,14 +107,17 @@ public:
     virtual ~Method() {}
 };
 
-class Class : Noncopyable
+class Class
 {
 public:
     virtual const char *name() const = 0;
     
-    virtual MethodList methodsNamed(const Identifier&, Instance*) const = 0;
+    virtual MethodList methodsNamed(const char *name, Instance*) const = 0;
     
-    virtual Field *fieldNamed(const Identifier&, Instance*) const = 0;
+    virtual Constructor *constructorAt(int i) const = 0;
+    virtual int numConstructors() const = 0;
+    
+    virtual Field *fieldNamed(const char *name, Instance*) const = 0;
 
     virtual JSValue* fallbackObject(ExecState*, Instance*, const Identifier&) { return jsUndefined(); }
     
@@ -83,27 +126,23 @@ public:
 
 typedef void (*KJSDidExecuteFunctionPtr)(ExecState*, JSObject* rootObject);
 
-class Instance : Noncopyable {
+class Instance
+{
 public:
     typedef enum {
         JavaLanguage,
         ObjectiveCLanguage,
         CLanguage
-#if PLATFORM(QT)
-        , QtLanguage
-#endif
     } BindingLanguage;
 
-    Instance(PassRefPtr<RootObject>);
+    Instance();
 
     static void setDidExecuteFunction(KJSDidExecuteFunctionPtr func);
     static KJSDidExecuteFunctionPtr didExecuteFunction();
     
-    static Instance* createBindingForLanguageInstance(BindingLanguage, void* nativeInstance, PassRefPtr<RootObject>);
-    static JSObject* createRuntimeObject(BindingLanguage, void* nativeInstance, PassRefPtr<RootObject>);
-    static JSObject* createRuntimeObject(Instance*);
-
-    static Instance* getInstance(JSObject*, BindingLanguage);
+    static Instance* createBindingForLanguageInstance(BindingLanguage, void* nativeInstance, const RootObject* = 0);
+    static void* createLanguageInstanceForValue(ExecState*, BindingLanguage, JSObject* value, const RootObject* origin, const RootObject* current);
+    static JSObject* createRuntimeObject(BindingLanguage, void* nativeInstance, const RootObject* = 0);
 
     void ref() { _refCount++; }
     void deref() 
@@ -131,44 +170,46 @@ public:
     virtual JSValue* invokeMethod(ExecState*, const MethodList&, const List& args) = 0;
     virtual JSValue* invokeDefaultMethod(ExecState*, const List&) { return jsUndefined(); }
     
-    virtual void getPropertyNames(ExecState*, PropertyNameArray&) { }
-
     virtual JSValue* defaultValue(JSType hint) const = 0;
     
     virtual JSValue* valueOf() const { return jsString(getClass()->name()); }
     
-    RootObject* rootObject() const;
+    void setExecutionContext(const RootObject *r) { _executionContext = r; }
+    const RootObject *executionContext() const { return _executionContext; }
     
-    virtual ~Instance();
-
-    virtual BindingLanguage getBindingLanguage() const = 0;
+    virtual ~Instance() {}
 
 protected:
-    RefPtr<RootObject> _rootObject;
+    const RootObject* _executionContext;
     unsigned _refCount;
+
+private:
+    Instance(const Instance &other); // prevent copying
+    Instance &operator=(const Instance &other); // ditto
 };
 
-class Array : Noncopyable
+class Array
 {
 public:
-    Array(PassRefPtr<RootObject>);
-    virtual ~Array();
-    
     virtual void setValueAt(ExecState *, unsigned index, JSValue*) const = 0;
     virtual JSValue* valueAt(ExecState *, unsigned index) const = 0;
     virtual unsigned int getLength() const = 0;
-protected:
-    RefPtr<RootObject> _rootObject;
+    virtual ~Array() {}
 };
 
 const char *signatureForParameters(const List&);
 
-typedef HashMap<RefPtr<UString::Rep>, MethodList*> MethodListMap;
-typedef HashMap<RefPtr<UString::Rep>, Method*> MethodMap; 
-typedef HashMap<RefPtr<UString::Rep>, Field*> FieldMap; 
-    
+void deleteMethodList(CFAllocatorRef, const void* value);
+void deleteMethod(CFAllocatorRef, const void* value);
+void deleteField(CFAllocatorRef, const void* value);
+
+const CFDictionaryValueCallBacks MethodListDictionaryValueCallBacks = { 0, 0, &deleteMethodList, 0 , 0 };
+const CFDictionaryValueCallBacks MethodDictionaryValueCallBacks = { 0, 0, &deleteMethod, 0 , 0 };
+const CFDictionaryValueCallBacks FieldDictionaryValueCallBacks = { 0, 0, &deleteField, 0 , 0 };
+
 } // namespace Bindings
 
 } // namespace KJS
 
+#endif //BINDINGS
 #endif

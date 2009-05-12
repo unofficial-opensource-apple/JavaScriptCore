@@ -24,46 +24,41 @@
  */
 
 #include "config.h"
-
-#if ENABLE(NETSCAPE_API)
-
 #include "c_class.h"
 
 #include "c_instance.h"
 #include "c_runtime.h"
-#include "identifier.h"
 #include "npruntime_impl.h"
 
-namespace KJS { namespace Bindings {
+// FIXME: Should use HashMap instead of CFDictionary for better performance and for portability.
+
+namespace KJS {
+namespace Bindings {
 
 CClass::CClass(NPClass* aClass)
 {
     _isa = aClass;
+    _methods = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &MethodDictionaryValueCallBacks);
+    _fields = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &FieldDictionaryValueCallBacks);
 }
 
 CClass::~CClass()
 {
-    JSLock lock;
-
-    deleteAllValues(_methods);
-    _methods.clear();
-
-    deleteAllValues(_fields);
-    _fields.clear();
+    CFRelease(_methods);
+    CFRelease(_fields);
 }
-
-typedef HashMap<NPClass*, CClass*> ClassesByIsAMap;
-static ClassesByIsAMap* classesByIsA = 0;
+    
+static CFMutableDictionaryRef classesByIsA = 0;
 
 CClass* CClass::classForIsA(NPClass* isa)
 {
     if (!classesByIsA)
-        classesByIsA = new ClassesByIsAMap;
+        classesByIsA = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
 
-    CClass* aClass = classesByIsA->get(isa);
+    CClass* aClass = (CClass*)CFDictionaryGetValue(classesByIsA, isa);
     if (!aClass) {
         aClass = new CClass(isa);
-        classesByIsA->set(isa, aClass);
+        CFDictionaryAddValue(classesByIsA, isa, aClass);
     }
 
     return aClass;
@@ -74,50 +69,53 @@ const char* CClass::name() const
     return "";
 }
 
-MethodList CClass::methodsNamed(const Identifier& identifier, Instance* instance) const
+MethodList CClass::methodsNamed(const char* _name, Instance* instance) const
 {
     MethodList methodList;
 
-    Method* method = _methods.get(identifier.ustring().rep());
+    CFStringRef methodName = CFStringCreateWithCString(NULL, _name, kCFStringEncodingASCII);
+    Method* method = (Method*)CFDictionaryGetValue(_methods, methodName);
     if (method) {
-        methodList.append(method);
+        CFRelease(methodName);
+        methodList.addMethod(method);
         return methodList;
     }
 
-    NPIdentifier ident = _NPN_GetStringIdentifier(identifier.ascii());
+    NPIdentifier ident = _NPN_GetStringIdentifier(_name);
     const CInstance* inst = static_cast<const CInstance*>(instance);
     NPObject* obj = inst->getObject();
     if (_isa->hasMethod && _isa->hasMethod(obj, ident)){
-        Method* aMethod = new CMethod(ident); // deleted in the CClass destructor
-        {
-            JSLock lock;
-            _methods.set(identifier.ustring().rep(), aMethod);
-        }
-        methodList.append(aMethod);
+        Method* aMethod = new CMethod(ident); // deleted when the dictionary is destroyed
+        CFDictionaryAddValue(_methods, methodName, aMethod);
+        methodList.addMethod(aMethod);
     }
-    
+
+    CFRelease(methodName);
     return methodList;
 }
 
-Field* CClass::fieldNamed(const Identifier& identifier, Instance* instance) const
+
+Field* CClass::fieldNamed(const char* name, Instance* instance) const
 {
-    Field* aField = _fields.get(identifier.ustring().rep());
-    if (aField)
+    CFStringRef fieldName = CFStringCreateWithCString(NULL, name, kCFStringEncodingASCII);
+    Field* aField = (Field *)CFDictionaryGetValue(_fields, fieldName);
+    if (aField) {
+        CFRelease(fieldName);
         return aField;
-    
-    NPIdentifier ident = _NPN_GetStringIdentifier(identifier.ascii());
+    }
+
+    NPIdentifier ident = _NPN_GetStringIdentifier(name);
     const CInstance* inst = static_cast<const CInstance*>(instance);
     NPObject* obj = inst->getObject();
     if (_isa->hasProperty && _isa->hasProperty(obj, ident)){
-        aField = new CField(ident); // deleted in the CClass destructor
-        {
-            JSLock lock;
-            _fields.set(identifier.ustring().rep(), aField);
-        }
+        aField = new CField(ident); // deleted when the dictionary is destroyed
+        CFDictionaryAddValue(_fields, fieldName, aField);
     }
+
+    CFRelease(fieldName);
     return aField;
 }
 
-} } // namespace KJS::Bindings
+}
+}
 
-#endif // ENABLE(NETSCAPE_API)

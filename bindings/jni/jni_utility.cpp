@@ -23,12 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS_JAVA_JAVA
+
 #include "config.h"
-
-#if ENABLE(JAVA_BINDINGS)
-
 #include "jni_utility.h"
 
+#include "interpreter.h"
 #include "list.h"
 #include "jni_runtime.h"
 #include "runtime_array.h"
@@ -57,15 +57,6 @@ static jint KJS_GetCreatedJavaVMs(JavaVM** vmBuf, jsize bufLen, jsize* nVMs)
 
 static JavaVM *jvm = 0;
 
-// Provide the ability for an outside component to specify the JavaVM to use
-// If the jvm value is set, the getJavaVM function below will just return. 
-// In getJNIEnv(), if AttachCurrentThread is called to a VM that is already
-// attached, the result is a no-op.
-void setJavaVM(JavaVM *javaVM)
-{
-    jvm = javaVM;
-}
-
 JavaVM *getJavaVM()
 {
     if (jvm)
@@ -87,17 +78,14 @@ JavaVM *getJavaVM()
     return jvm;
 }
 
-JNIEnv* getJNIEnv()
+JNIEnv *getJNIEnv()
 {
-    union {
-        JNIEnv* env;
-        void* dummy;
-    } u;
+    JNIEnv *env;
     jint jniError = 0;
 
-    jniError = (getJavaVM())->AttachCurrentThread(&u.dummy, NULL);
-    if (jniError == JNI_OK)
-        return u.env;
+    jniError = (getJavaVM())->AttachCurrentThread((void**)&env, (void *)NULL);
+    if ( jniError == JNI_OK )
+        return env;
     else
         fprintf(stderr, "%s: AttachCurrentThread failed, returned %ld\n", __PRETTY_FUNCTION__, (long)jniError);
     return NULL;
@@ -120,7 +108,6 @@ static jvalue callJNIMethod (JNIType type, jobject obj, const char *name, const 
                 case void_type:
                     env->functions->CallVoidMethodV(env, obj, mid, args);
                     break;
-                case array_type:
                 case object_type:
                     result.l = env->functions->CallObjectMethodV(env, obj, mid, args);
                     break;
@@ -185,7 +172,6 @@ static jvalue callJNIStaticMethod (JNIType type, jclass cls, const char *name, c
             case void_type:
                 env->functions->CallStaticVoidMethodV(env, cls, mid, args);
                 break;
-            case array_type:
             case object_type:
                 result.l = env->functions->CallStaticObjectMethodV(env, cls, mid, args);
                 break;
@@ -241,7 +227,6 @@ static jvalue callJNIMethodIDA (JNIType type, jobject obj, jmethodID mid, jvalue
         case void_type:
             env->functions->CallVoidMethodA(env, obj, mid, args);
             break;
-        case array_type:
         case object_type:
             result.l = env->functions->CallObjectMethodA(env, obj, mid, args);
             break;
@@ -312,18 +297,18 @@ jmethodID getMethodID (jobject obj, const char *name, const char *sig)
 {
     JNIEnv *env = getJNIEnv();
     jmethodID mid = 0;
-        
+	
     if ( env != NULL) {
     jclass cls = env->GetObjectClass(obj);
     if ( cls != NULL ) {
             mid = env->GetMethodID(cls, name, sig);
-            if (!mid) {
+	    if (!mid) {
                 env->ExceptionClear();
-                mid = env->GetStaticMethodID(cls, name, sig);
-                if (!mid) {
-                    env->ExceptionClear();
-                }
-            }
+		mid = env->GetStaticMethodID(cls, name, sig);
+		if (!mid) {
+		    env->ExceptionClear();
+		}
+	    }
         }
         env->DeleteLocalRef(cls);
     }
@@ -547,7 +532,7 @@ const char *getCharactersFromJStringInEnv (JNIEnv *env, jstring aJString)
     if (!s) {
         env->ExceptionDescribe();
         env->ExceptionClear();
-                fprintf (stderr, "\n");
+		fprintf (stderr, "\n");
     }
     return s;
 }
@@ -564,7 +549,7 @@ const jchar *getUCharactersFromJStringInEnv (JNIEnv *env, jstring aJString)
     if (!s) {
         env->ExceptionDescribe();
         env->ExceptionClear();
-                fprintf (stderr, "\n");
+		fprintf (stderr, "\n");
     }
     return s;
 }
@@ -596,8 +581,6 @@ JNIType JNITypeFromClassName(const char *name)
         type = boolean_type;
     else if (strcmp("void",name) == 0)
         type = void_type;
-    else if ('[' == name[0]) 
-        type = array_type;
     else
         type = object_type;
         
@@ -609,9 +592,6 @@ const char *signatureFromPrimitiveType(JNIType type)
     switch (type){
         case void_type: 
             return "V";
-        
-        case array_type:
-            return "[";
         
         case object_type:
             return "L";
@@ -654,10 +634,8 @@ JNIType JNITypeFromPrimitiveType(char type)
             return void_type;
         
         case 'L':
-            return object_type;
-            
         case '[':
-            return array_type;
+            return object_type;
         
         case 'Z':
             return boolean_type;
@@ -702,7 +680,6 @@ jvalue getJNIField( jobject obj, JNIType type, const char *name, const char *sig
             jfieldID field = env->GetFieldID(cls, name, signature);
             if ( field != NULL ) {
                 switch (type) {
-                case array_type:
                 case object_type:
                     result.l = env->functions->GetObjectField(env, obj, field);
                     break;
@@ -752,184 +729,50 @@ jvalue getJNIField( jobject obj, JNIType type, const char *name, const char *sig
     return result;
 }
 
-static jobject convertArrayInstanceToJavaArray(ExecState *exec, JSValue *value, const char *javaClassName) {
-
-    ASSERT(JSLock::lockCount() > 0);
-    
-    JNIEnv *env = getJNIEnv();
-    // As JS Arrays can contain a mixture of objects, assume we can convert to
-    // the requested Java Array type requested, unless the array type is some object array
-    // other than a string.
-    ArrayInstance *jsArray = static_cast<ArrayInstance *>(value);
-    unsigned length = jsArray->getLength();
-    jobjectArray jarray = 0;
-    
-    // Build the correct array type
-    switch (JNITypeFromPrimitiveType(javaClassName[1])) { 
-        case object_type: {
-        // Only support string object types
-        if (0 == strcmp("[Ljava.lang.String;", javaClassName)) {
-            jarray = (jobjectArray)env->NewObjectArray(length,
-                env->FindClass("java/lang/String"),
-                env->NewStringUTF(""));
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                UString stringValue = item->toString(exec);
-                env->SetObjectArrayElement(jarray,i,
-                    env->functions->NewString(env, (const jchar *)stringValue.data(), stringValue.size()));
-                }
-            }
-            break;
-        }
-        
-        case boolean_type: {
-            jarray = (jobjectArray)env->NewBooleanArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jboolean value = (jboolean)item->toNumber(exec);
-                env->SetBooleanArrayRegion((jbooleanArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-        
-        case byte_type: {
-            jarray = (jobjectArray)env->NewByteArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jbyte value = (jbyte)item->toNumber(exec);
-                env->SetByteArrayRegion((jbyteArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-
-        case char_type: {
-            jarray = (jobjectArray)env->NewCharArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                UString stringValue = item->toString(exec);
-                jchar value = 0;
-                if (stringValue.size() > 0)
-                    value = ((const jchar*)stringValue.data())[0];
-                env->SetCharArrayRegion((jcharArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-
-        case short_type: {
-            jarray = (jobjectArray)env->NewShortArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jshort value = (jshort)item->toNumber(exec);
-                env->SetShortArrayRegion((jshortArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-
-        case int_type: {
-            jarray = (jobjectArray)env->NewIntArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jint value = (jint)item->toNumber(exec);
-                env->SetIntArrayRegion((jintArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-
-        case long_type: {
-            jarray = (jobjectArray)env->NewLongArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jlong value = (jlong)item->toNumber(exec);
-                env->SetLongArrayRegion((jlongArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-
-        case float_type: {
-            jarray = (jobjectArray)env->NewFloatArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jfloat value = (jfloat)item->toNumber(exec);
-                env->SetFloatArrayRegion((jfloatArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-    
-        case double_type: {
-            jarray = (jobjectArray)env->NewDoubleArray(length);
-            for(unsigned i = 0; i < length; i++) {
-                JSValue* item = jsArray->getItem(i);
-                jdouble value = (jdouble)item->toNumber(exec);
-                env->SetDoubleArrayRegion((jdoubleArray)jarray, (jsize)i, (jsize)1, &value);
-            }
-            break;
-        }
-        
-        case array_type: // don't handle embedded arrays
-        case void_type: // Don't expect arrays of void objects
-        case invalid_type: // Array of unknown objects
-            break;
-    }
-    
-    // if it was not one of the cases handled, then null is returned
-    return jarray;
-}
-
-
 jvalue convertValueToJValue (ExecState *exec, JSValue *value, JNIType _JNIType, const char *javaClassName)
 {
-    JSLock lock;
-    
     jvalue result;
    
     switch (_JNIType){
-        case array_type:
         case object_type: {
             result.l = (jobject)0;
             
             // First see if we have a Java instance.
             if (value->isObject()){
                 JSObject *objectImp = static_cast<JSObject*>(value);
-                if (objectImp->classInfo() == &RuntimeObjectImp::info) {
-                    RuntimeObjectImp *imp = static_cast<RuntimeObjectImp *>(value);
-                    JavaInstance *instance = static_cast<JavaInstance*>(imp->getInternalInstance());
-                    if (instance)
-                        result.l = instance->javaInstance();
-                }
-                else if (objectImp->classInfo() == &RuntimeArray::info) {
-                // Input is a JavaScript Array that was originally created from a Java Array
-                    RuntimeArray *imp = static_cast<RuntimeArray *>(value);
-                    JavaArray *array = static_cast<JavaArray*>(imp->getConcreteArray());
-                    result.l = array->javaArray();
-                } 
-                else if (objectImp->classInfo() == &ArrayInstance::info) {
-                    // Input is a Javascript Array. We need to create it to a Java Array.
-                    result.l = convertArrayInstanceToJavaArray(exec, value, javaClassName);
-                }
+		if (objectImp->classInfo() == &RuntimeObjectImp::info) {
+		    RuntimeObjectImp *imp = static_cast<RuntimeObjectImp *>(value);
+		    JavaInstance *instance = static_cast<JavaInstance*>(imp->getInternalInstance());
+		    result.l = instance->javaInstance();
+		}
+		else if (objectImp->classInfo() == &RuntimeArray::info) {
+		    RuntimeArray *imp = static_cast<RuntimeArray *>(value);
+		    JavaArray *array = static_cast<JavaArray*>(imp->getConcreteArray());
+		    result.l = array->javaArray();
+		}
             }
             
             // Now convert value to a string if the target type is a java.lang.string, and we're not
             // converting from a Null.
             if (result.l == 0 && strcmp(javaClassName, "java.lang.String") == 0) {
 #ifdef CONVERT_NULL_TO_EMPTY_STRING
-                if (value->isNull()) {
-                    JNIEnv *env = getJNIEnv();
-                    jchar buf[2];
-                    jobject javaString = env->functions->NewString (env, buf, 0);
-                    result.l = javaString;
-                }
-                else 
+		if (value->isNull()) {
+		    JNIEnv *env = getJNIEnv();
+		    jchar buf[2];
+		    jobject javaString = env->functions->NewString (env, buf, 0);
+		    result.l = javaString;
+		}
+		else 
 #else
-                if (!value->isNull())
+		if (!value->isNull())
 #endif
-                {
-                    UString stringValue = value->toString(exec);
-                    JNIEnv *env = getJNIEnv();
-                    jobject javaString = env->functions->NewString (env, (const jchar *)stringValue.data(), stringValue.size());
-                    result.l = javaString;
-                }
-            } else if (result.l == 0) 
-                bzero (&result, sizeof(jvalue)); // Handle it the same as a void case
+		{
+		    UString stringValue = value->toString(exec);
+		    JNIEnv *env = getJNIEnv();
+		    jobject javaString = env->functions->NewString (env, (const jchar *)stringValue.data(), stringValue.size());
+		    result.l = javaString;
+		}
+            }
         }
         break;
         
@@ -985,8 +828,8 @@ jvalue convertValueToJValue (ExecState *exec, JSValue *value, JNIType _JNIType, 
     return result;
 }
 
-}  // end of namespace Bindings
+}
 
-} // end of namespace KJS
+}
 
-#endif // ENABLE(JAVA_BINDINGS)
+#endif // BINDINGS_JAVA

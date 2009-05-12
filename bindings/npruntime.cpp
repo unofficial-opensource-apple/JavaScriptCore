@@ -24,59 +24,80 @@
  */
 
 #include "config.h"
-
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
+#include "npruntime.h"
 #include "npruntime_impl.h"
 #include "npruntime_priv.h"
 
-#include "JSLock.h"
 #include "c_utility.h"
-#include "identifier.h"
-#include <wtf/Assertions.h>
-#include <wtf/HashMap.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+// FIXME: Use HashMap instead of CFDictionary for better performance and portability.
 
 using namespace KJS::Bindings;
 
-typedef HashMap<RefPtr<KJS::UString::Rep>, PrivateIdentifier*> StringIdentifierMap;
-
-static StringIdentifierMap* getStringIdentifierMap()
+static Boolean stringIdentifierEqual(const void* value1, const void* value2)
 {
-    static StringIdentifierMap* stringIdentifierMap = 0;
-    if (!stringIdentifierMap)
-        stringIdentifierMap = new StringIdentifierMap;
-    return stringIdentifierMap;
+    return strcmp((const char*)value1, (const char*)value2) == 0;
 }
 
-typedef HashMap<int, PrivateIdentifier*> IntIdentifierMap;
-
-static IntIdentifierMap* getIntIdentifierMap()
+static CFHashCode stringIdentifierHash(const void* value)
 {
-    static IntIdentifierMap* intIdentifierMap = 0;
-    if (!intIdentifierMap)
-        intIdentifierMap = new IntIdentifierMap;
-    return intIdentifierMap;
+    const unsigned char* key = (const unsigned char*)value;
+    unsigned len = strlen((const char*)key);
+    unsigned result = len;
+
+    if (len <= 16) {
+        unsigned cnt = len;
+        while (cnt--)
+            result = result * 257 + *key++;
+    } else {
+        unsigned cnt;
+        for (cnt = 8; cnt > 0; cnt--)
+            result = result * 257 + *key++;
+        key += (len - 16);
+        for (cnt = 8; cnt > 0; cnt--)
+            result = result * 257 + *key++;
+    }
+    result += (result << (len & 31));
+
+    return result;
+}
+
+static CFMutableDictionaryRef getStringIdentifierDictionary()
+{
+    static CFMutableDictionaryRef stringIdentifierDictionary = 0;
+    if (!stringIdentifierDictionary) {
+        CFDictionaryKeyCallBacks stringIdentifierCallbacks = { 0, NULL, NULL, NULL, stringIdentifierEqual, stringIdentifierHash };
+        stringIdentifierDictionary = CFDictionaryCreateMutable(NULL, 0, &stringIdentifierCallbacks, NULL);
+    }
+    return stringIdentifierDictionary;
+}
+
+static CFMutableDictionaryRef getIntIdentifierDictionary()
+{
+    static CFMutableDictionaryRef intIdentifierDictionary = 0;
+    if (!intIdentifierDictionary)
+        intIdentifierDictionary = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
+    return intIdentifierDictionary;
 }
 
 NPIdentifier _NPN_GetStringIdentifier(const NPUTF8* name)
 {
-    ASSERT(name);
+    assert(name);
     
     if (name) {
         PrivateIdentifier* identifier = 0;
         
-        KJS::JSLock lock;
-        
-        identifier = getStringIdentifierMap()->get(identifierFromNPIdentifier(name).ustring().rep());
+        identifier = (PrivateIdentifier*)CFDictionaryGetValue(getStringIdentifierDictionary(), name);
         if (identifier == 0) {
             identifier = (PrivateIdentifier*)malloc(sizeof(PrivateIdentifier));
             // We never release identifier names, so this dictionary will grow, as will
             // the memory for the identifier name strings.
             identifier->isString = true;
-            identifier->value.string = strdup(name);
+            const char* identifierName = strdup(name);
+            identifier->value.string = identifierName;
 
-            getStringIdentifierMap()->set(identifierFromNPIdentifier(name).ustring().rep(), identifier);
+            CFDictionaryAddValue(getStringIdentifierDictionary(), identifierName, identifier);
         }
         return (NPIdentifier)identifier;
     }
@@ -86,8 +107,8 @@ NPIdentifier _NPN_GetStringIdentifier(const NPUTF8* name)
 
 void _NPN_GetStringIdentifiers(const NPUTF8** names, int32_t nameCount, NPIdentifier* identifiers)
 {
-    ASSERT(names);
-    ASSERT(identifiers);
+    assert(names);
+    assert(identifiers);
     
     if (names && identifiers)
         for (int i = 0; i < nameCount; i++)
@@ -96,29 +117,16 @@ void _NPN_GetStringIdentifiers(const NPUTF8** names, int32_t nameCount, NPIdenti
 
 NPIdentifier _NPN_GetIntIdentifier(int32_t intid)
 {
-    PrivateIdentifier* identifier;
+    PrivateIdentifier* identifier = 0;
+    
+    identifier = (PrivateIdentifier*)CFDictionaryGetValue(getIntIdentifierDictionary(), (const void*)intid);
+    if (identifier == 0) {
+        identifier = (PrivateIdentifier*)malloc(sizeof(PrivateIdentifier));
+        // We never release identifier names, so this dictionary will grow.
+        identifier->isString = false;
+        identifier->value.number = intid;
 
-    if (intid == 0 || intid == -1) {
-        static PrivateIdentifier* negativeOneAndZeroIdentifiers[2];
-
-        identifier = negativeOneAndZeroIdentifiers[intid + 1];
-        if (!identifier) {
-            identifier = (PrivateIdentifier*)malloc(sizeof(PrivateIdentifier));
-            identifier->isString = false;
-            identifier->value.number = intid;
-
-            negativeOneAndZeroIdentifiers[intid + 1] = identifier;
-        }
-    } else {
-        identifier = getIntIdentifierMap()->get(intid);
-        if (!identifier) {
-            identifier = (PrivateIdentifier*)malloc(sizeof(PrivateIdentifier));
-            // We never release identifier names, so this dictionary will grow.
-            identifier->isString = false;
-            identifier->value.number = intid;
-
-            getIntIdentifierMap()->set(intid, identifier);
-        }
+        CFDictionaryAddValue(getIntIdentifierDictionary(), (const void*)intid, identifier);
     }
     return (NPIdentifier)identifier;
 }
@@ -156,7 +164,7 @@ void NPN_InitializeVariantWithStringCopy(NPVariant* variant, const NPString* val
 
 void _NPN_ReleaseVariantValue(NPVariant* variant)
 {
-    ASSERT(variant);
+    assert(variant);
 
     if (variant->type == NPVariantType_Object) {
         _NPN_ReleaseObject(variant->value.objectValue);
@@ -172,7 +180,7 @@ void _NPN_ReleaseVariantValue(NPVariant* variant)
 
 NPObject *_NPN_CreateObject(NPP npp, NPClass* aClass)
 {
-    ASSERT(aClass);
+    assert(aClass);
 
     if (aClass) {
         NPObject* obj;
@@ -192,7 +200,7 @@ NPObject *_NPN_CreateObject(NPP npp, NPClass* aClass)
 
 NPObject* _NPN_RetainObject(NPObject* obj)
 {
-    ASSERT(obj);
+    assert(obj);
 
     if (obj)
         obj->referenceCount++;
@@ -202,8 +210,8 @@ NPObject* _NPN_RetainObject(NPObject* obj)
 
 void _NPN_ReleaseObject(NPObject* obj)
 {
-    ASSERT(obj);
-    ASSERT(obj->referenceCount >= 1);
+    assert(obj);
+    assert(obj->referenceCount >= 1);
 
     if (obj && obj->referenceCount >= 1) {
         if (--obj->referenceCount == 0)
@@ -213,7 +221,7 @@ void _NPN_ReleaseObject(NPObject* obj)
 
 void _NPN_DeallocateObject(NPObject *obj)
 {
-    ASSERT(obj);
+    assert(obj);
 
     if (obj) {
         if (obj->_class->deallocate)
@@ -222,5 +230,3 @@ void _NPN_DeallocateObject(NPObject *obj)
             free(obj);
     }
 }
-
-#endif // ENABLE(NETSCAPE_API)

@@ -4,7 +4,6 @@
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
  *  Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
- *  Copyright (C) 2007 Eric Seidel (eric@webkit.org)
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -26,23 +25,24 @@
 #include "config.h"
 #include "object.h"
 
-#include "date_object.h"
 #include "error_object.h"
 #include "lookup.h"
 #include "nodes.h"
 #include "operations.h"
 #include "PropertyNameArray.h"
 #include <math.h>
-#include <wtf/Assertions.h>
 
 // maximum global call stack size. Protects against accidental or
 // malicious infinite recursions. Define to -1 if you want no limit.
-// In real-world testing it appears ok to bump the stack depth count to 500.
-// This of course is dependent on stack frame size.
-#define KJS_MAX_STACK 500
+#if PLATFORM(DARWIN)
+// Given OS X stack sizes we run out of stack at about 350 levels.
+// If we improve our stack usage, we can bump this number.
+#define KJS_MAX_STACK 100
+#else
+#define KJS_MAX_STACK 1000
+#endif
 
 #define JAVASCRIPT_CALL_TRACING 0
-#define JAVASCRIPT_MARK_TRACING 0
 
 #if JAVASCRIPT_CALL_TRACING
 static bool _traceJavaScript = false;
@@ -66,10 +66,10 @@ namespace KJS {
 
 JSValue *JSObject::call(ExecState *exec, JSObject *thisObj, const List &args)
 {
-  ASSERT(implementsCall());
+  assert(implementsCall());
 
 #if KJS_MAX_STACK > 0
-  static int depth = 0; // sum of all extant function calls
+  static int depth = 0; // sum of all concurrent interpreters
 
 #if JAVASCRIPT_CALL_TRACING
     static bool tracing = false;
@@ -118,24 +118,16 @@ void JSObject::mark()
 {
   JSCell::mark();
 
-#if JAVASCRIPT_MARK_TRACING
-  static int markStackDepth = 0;
-  markStackDepth++;
-  for (int i = 0; i < markStackDepth; i++)
-    putchar('-');
-  
-  printf("%s (%p)\n", className().UTF8String().c_str(), this);
-#endif
-  
   JSValue *proto = _proto;
   if (!proto->marked())
     proto->mark();
 
   _prop.mark();
-  
-#if JAVASCRIPT_MARK_TRACING
-  markStackDepth--;
-#endif
+
+  if (_internalValue && !_internalValue->marked())
+    _internalValue->mark();
+
+  _scope.mark();
 }
 
 JSType JSObject::type() const
@@ -204,25 +196,27 @@ static void throwSetterError(ExecState *exec)
 }
 
 // ECMA 8.6.2.2
-void JSObject::put(ExecState* exec, const Identifier &propertyName, JSValue *value, int attr)
+void JSObject::put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr)
 {
-  ASSERT(value);
+  assert(value);
 
-  if (propertyName == exec->propertyNames().underscoreProto) {
-    JSObject* proto = value->getObject();
-    while (proto) {
-      if (proto == this)
-        throwError(exec, GeneralError, "cyclic __proto__ value");
-      proto = proto->prototype() ? proto->prototype()->getObject() : 0;
-    }
-    
+  // non-standard netscape extension
+  if (propertyName == exec->dynamicInterpreter()->specialPrototypeIdentifier()) {
     setPrototype(value);
     return;
   }
 
-  // The put calls from JavaScript execution either have no attributes set, or in some cases
-  // have DontDelete set. For those calls, respect the ReadOnly flag.
-  bool checkReadOnly = !(attr & ~DontDelete);
+  /* TODO: check for write permissions directly w/o this call */
+  /* Doesn't look very easy with the PropertyMap API - David */
+  // putValue() is used for JS assignemnts. It passes no attribute.
+  // Assume that a C++ implementation knows what it is doing
+  // and let it override the canPut() check.
+  if ((attr == None || attr == DontDelete) && !canPut(exec,propertyName)) {
+#ifdef KJS_VERBOSE
+    fprintf( stderr, "WARNING: canPut %s said NO\n", propertyName.ascii() );
+#endif
+    return;
+  }
 
   // Check if there are any setters or getters in the prototype chain
   JSObject *obj = this;
@@ -240,9 +234,6 @@ void JSObject::put(ExecState* exec, const Identifier &propertyName, JSValue *val
   }
   
   if (hasGettersOrSetters) {
-    if (checkReadOnly && !canPut(exec, propertyName))
-      return;
-
     obj = this;
     while (true) {
       unsigned attributes;
@@ -274,7 +265,7 @@ void JSObject::put(ExecState* exec, const Identifier &propertyName, JSValue *val
     }
   }
   
-  _prop.put(propertyName, value, attr, checkReadOnly);
+  _prop.put(propertyName,value,attr);
 }
 
 void JSObject::put(ExecState *exec, unsigned propertyName,
@@ -290,13 +281,11 @@ bool JSObject::canPut(ExecState *, const Identifier &propertyName) const
     
   // Don't look in the prototype here. We can always put an override
   // in the object, even if the prototype has a ReadOnly property.
-  // Also, there is no need to check the static property table, as this
-  // would have been done by the subclass already.
 
-  if (!_prop.get(propertyName, attributes))
+  if (!getPropertyAttributes(propertyName, attributes))
     return true;
-
-  return !(attributes & ReadOnly);
+  else
+    return !(attributes & ReadOnly);
 }
 
 // ECMA 8.6.2.4
@@ -313,7 +302,7 @@ bool JSObject::hasProperty(ExecState *exec, unsigned propertyName) const
 }
 
 // ECMA 8.6.2.5
-bool JSObject::deleteProperty(ExecState* /*exec*/, const Identifier &propertyName)
+bool JSObject::deleteProperty(ExecState */*exec*/, const Identifier &propertyName)
 {
   unsigned attributes;
   JSValue *v = _prop.get(propertyName, attributes);
@@ -333,12 +322,6 @@ bool JSObject::deleteProperty(ExecState* /*exec*/, const Identifier &propertyNam
   return true;
 }
 
-bool JSObject::hasOwnProperty(ExecState* exec, const Identifier& propertyName) const
-{
-    PropertySlot slot;
-    return const_cast<JSObject*>(this)->getOwnPropertySlot(exec, propertyName, slot);
-}
-
 bool JSObject::deleteProperty(ExecState *exec, unsigned propertyName)
 {
   return deleteProperty(exec, Identifier::from(propertyName));
@@ -350,7 +333,7 @@ static ALWAYS_INLINE JSValue *tryGetAndCallProperty(ExecState *exec, const JSObj
     JSObject *o = static_cast<JSObject*>(v);
     if (o->implementsCall()) { // spec says "not primitive type" but ...
       JSObject *thisObj = const_cast<JSObject*>(object);
-      JSValue* def = o->call(exec, thisObj, exec->emptyList());
+      JSValue *def = o->call(exec, thisObj, List::empty());
       JSType defType = def->type();
       ASSERT(defType != GetterSetterType);
       if (defType != ObjectType)
@@ -360,28 +343,25 @@ static ALWAYS_INLINE JSValue *tryGetAndCallProperty(ExecState *exec, const JSObj
   return NULL;
 }
 
-bool JSObject::getPrimitiveNumber(ExecState* exec, double& number, JSValue*& result)
-{
-    result = defaultValue(exec, NumberType);
-    number = result->toNumber(exec);
-    return !result->isString();
-}
-
 // ECMA 8.6.2.6
-JSValue* JSObject::defaultValue(ExecState* exec, JSType hint) const
+JSValue *JSObject::defaultValue(ExecState *exec, JSType hint) const
 {
+  Identifier firstPropertyName;
+  Identifier secondPropertyName;
   /* Prefer String for Date objects */
-  if ((hint == StringType) || (hint != NumberType && _proto == exec->lexicalGlobalObject()->datePrototype())) {
-    if (JSValue* v = tryGetAndCallProperty(exec, this, exec->propertyNames().toString))
-      return v;
-    if (JSValue* v = tryGetAndCallProperty(exec, this, exec->propertyNames().valueOf))
-      return v;
+  if ((hint == StringType) || (hint != StringType) && (hint != NumberType) && (_proto == exec->lexicalInterpreter()->builtinDatePrototype())) {
+    firstPropertyName = toStringPropertyName;
+    secondPropertyName = valueOfPropertyName;
   } else {
-    if (JSValue* v = tryGetAndCallProperty(exec, this, exec->propertyNames().valueOf))
-      return v;
-    if (JSValue* v = tryGetAndCallProperty(exec, this, exec->propertyNames().toString))
-      return v;
+    firstPropertyName = valueOfPropertyName;
+    secondPropertyName = toStringPropertyName;
   }
+
+  JSValue *v;
+  if ((v = tryGetAndCallProperty(exec, this, firstPropertyName)))
+    return v;
+  if ((v = tryGetAndCallProperty(exec, this, secondPropertyName)))
+    return v;
 
   if (exec->hadException())
     return exec->exception();
@@ -439,7 +419,7 @@ bool JSObject::implementsConstruct() const
 
 JSObject* JSObject::construct(ExecState*, const List& /*args*/)
 {
-  ASSERT(false);
+  assert(false);
   return NULL;
 }
 
@@ -453,9 +433,9 @@ bool JSObject::implementsCall() const
   return false;
 }
 
-JSValue *JSObject::callAsFunction(ExecState* /*exec*/, JSObject* /*thisObj*/, const List &/*args*/)
+JSValue *JSObject::callAsFunction(ExecState */*exec*/, JSObject */*thisObj*/, const List &/*args*/)
 {
-  ASSERT(false);
+  assert(false);
   return NULL;
 }
 
@@ -466,7 +446,7 @@ bool JSObject::implementsHasInstance() const
 
 bool JSObject::hasInstance(ExecState* exec, JSValue* value)
 {
-    JSValue* proto = get(exec, exec->propertyNames().prototype);
+    JSValue* proto = get(exec, prototypePropertyName);
     if (!proto->isObject()) {
         throwError(exec, TypeError, "intanceof called on an object with an invalid prototype property.");
         return false;
@@ -529,7 +509,7 @@ void JSObject::getPropertyNames(ExecState* exec, PropertyNameArray& propertyName
      static_cast<JSObject*>(_proto)->getPropertyNames(exec, propertyNames);
 }
 
-bool JSObject::toBoolean(ExecState*) const
+bool JSObject::toBoolean(ExecState */*exec*/) const
 {
   return true;
 }
@@ -550,7 +530,7 @@ UString JSObject::toString(ExecState *exec) const
   return prim->toString(exec);
 }
 
-JSObject *JSObject::toObject(ExecState*) const
+JSObject *JSObject::toObject(ExecState */*exec*/) const
 {
   return const_cast<JSObject*>(this);
 }
@@ -563,11 +543,6 @@ void JSObject::putDirect(const Identifier &propertyName, JSValue *value, int att
 void JSObject::putDirect(const Identifier &propertyName, int value, int attr)
 {
     _prop.put(propertyName, jsNumber(value), attr);
-}
-
-void JSObject::removeDirect(const Identifier &propertyName)
-{
-    _prop.remove(propertyName);
 }
 
 void JSObject::putDirectFunction(InternalFunctionImp* func, int attr)
@@ -600,30 +575,30 @@ const char * const errorNamesArr[] = {
 const char * const * const Error::errorNames = errorNamesArr;
 
 JSObject *Error::create(ExecState *exec, ErrorType errtype, const UString &message,
-                         int lineno, intptr_t sourceID, const UString &sourceURL)
+                         int lineno, int sourceId, const UString &sourceURL)
 {
   JSObject *cons;
   switch (errtype) {
   case EvalError:
-    cons = exec->lexicalGlobalObject()->evalErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinEvalError();
     break;
   case RangeError:
-    cons = exec->lexicalGlobalObject()->rangeErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinRangeError();
     break;
   case ReferenceError:
-    cons = exec->lexicalGlobalObject()->referenceErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinReferenceError();
     break;
   case SyntaxError:
-    cons = exec->lexicalGlobalObject()->syntaxErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinSyntaxError();
     break;
   case TypeError:
-    cons = exec->lexicalGlobalObject()->typeErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinTypeError();
     break;
   case URIError:
-    cons = exec->lexicalGlobalObject()->URIErrorConstructor();
+    cons = exec->lexicalInterpreter()->builtinURIError();
     break;
   default:
-    cons = exec->lexicalGlobalObject()->errorConstructor();
+    cons = exec->lexicalInterpreter()->builtinError();
     break;
   }
 
@@ -636,13 +611,25 @@ JSObject *Error::create(ExecState *exec, ErrorType errtype, const UString &messa
 
   if (lineno != -1)
     err->put(exec, "line", jsNumber(lineno));
-  if (sourceID != -1)
-    err->put(exec, "sourceID", jsNumber(sourceID));
+  if (sourceId != -1)
+    err->put(exec, "sourceId", jsNumber(sourceId));
 
   if(!sourceURL.isNull())
     err->put(exec, "sourceURL", jsString(sourceURL));
  
   return err;
+
+/*
+#ifndef NDEBUG
+  const char *msg = err->get(messagePropertyName)->toString().value().ascii();
+  if (l >= 0)
+      fprintf(stderr, "KJS: %s at line %d. %s\n", estr, l, msg);
+  else
+      fprintf(stderr, "KJS: %s. %s\n", estr, msg);
+#endif
+
+  return err;
+*/
 }
 
 JSObject *Error::create(ExecState *exec, ErrorType type, const char *message)
@@ -671,9 +658,9 @@ JSObject *throwError(ExecState *exec, ErrorType type, const char *message)
     return error;
 }
 
-JSObject *throwError(ExecState *exec, ErrorType type, const UString &message, int line, intptr_t sourceID, const UString &sourceURL)
+JSObject *throwError(ExecState *exec, ErrorType type, const UString &message, int line, int sourceId, const UString &sourceURL)
 {
-    JSObject *error = Error::create(exec, type, message, line, sourceID, sourceURL);
+    JSObject *error = Error::create(exec, type, message, line, sourceId, sourceURL);
     exec->setException(error);
     return error;
 }

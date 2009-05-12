@@ -26,7 +26,6 @@
 
 VPATH = \
     $(JavaScriptCore)/kjs \
-    $(JavaScriptCore)/pcre \
 #
 
 .PHONY : all
@@ -51,15 +50,14 @@ lexer.lut.h: create_hash_table keywords.table
 
 # JavaScript language grammar
 
-grammar.cpp: grammar.y
-	bison -d -p kjsyy $< -o $@ > bison_out.txt 2>&1
-	perl -p -e 'END { if ($$conflict) { unlink "grammar.cpp"; die; } } $$conflict ||= /conflict/' < bison_out.txt
+grammar.cpp : grammar.y
+	bison -d -p kjsyy $< -o $@
 	touch grammar.cpp.h
 	touch grammar.hpp
 	cat grammar.cpp.h grammar.hpp > grammar.h
-	rm -f grammar.cpp.h grammar.hpp bison_out.txt
+	rm -f grammar.cpp.h grammar.hpp
 
 # character tables for PCRE
 
-chartables.c : dftables
+chartables.c : $(BUILT_PRODUCTS_DIR)/dftables
 	$^ $@

@@ -1,6 +1,8 @@
 // -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * This file is part of the KDE libraries
+ *
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +21,8 @@
  *
  */
 
-#ifndef WTF_HashSet_h
-#define WTF_HashSet_h
+#ifndef KXMLCORE_HASH_SET_H
+#define KXMLCORE_HASH_SET_H
 
 #include "HashTable.h"
 
@@ -55,8 +57,6 @@ namespace WTF {
         HashSet(const HashSet&);
         HashSet& operator=(const HashSet&);
         ~HashSet();
-
-        void swap(HashSet&);
 
         int size() const;
         int capacity() const;
@@ -100,30 +100,30 @@ namespace WTF {
         static const T& extract(const T& t) { return t; }
     };
 
-    template<bool canReplaceDeletedValue, typename ValueType, typename ValueTraits, typename StorageTraits, typename HashFunctions>
+    template<bool canReplaceDeletedValue, typename ValueType, typename StorageTraits, typename HashFunctions>
     struct HashSetTranslator;
 
-    template<typename ValueType, typename ValueTraits, typename StorageTraits, typename HashFunctions>
-    struct HashSetTranslator<true, ValueType, ValueTraits, StorageTraits, HashFunctions> {
+    template<typename ValueType, typename StorageTraits, typename HashFunctions>
+    struct HashSetTranslator<true, ValueType, StorageTraits, HashFunctions> {
         typedef typename StorageTraits::TraitType StorageType;
         static unsigned hash(const ValueType& key) { return HashFunctions::hash(key); }
         static bool equal(const StorageType& a, const ValueType& b) { return HashFunctions::equal(*(const ValueType*)&a, b); }
-        static void translate(StorageType& location, const ValueType& key, const ValueType&)
+        static void translate(StorageType& location, const ValueType& key, const ValueType&, unsigned)
         {
-            Assigner<ValueTraits::needsRef, ValueType, StorageType, ValueTraits>::assign(key, location);
+            *(ValueType*)&location = key;
         }
     };
 
-    template<typename ValueType, typename ValueTraits, typename StorageTraits, typename HashFunctions>
-    struct HashSetTranslator<false, ValueType, ValueTraits, StorageTraits, HashFunctions> {
+    template<typename ValueType, typename StorageTraits, typename HashFunctions>
+    struct HashSetTranslator<false, ValueType, StorageTraits, HashFunctions> {
         typedef typename StorageTraits::TraitType StorageType;
         static unsigned hash(const ValueType& key) { return HashFunctions::hash(key); }
         static bool equal(const StorageType& a, const ValueType& b) { return HashFunctions::equal(*(const ValueType*)&a, b); }
-        static void translate(StorageType& location, const ValueType& key, const ValueType&)
+        static void translate(StorageType& location, const ValueType& key, const ValueType&, unsigned)
         {
             if (location == StorageTraits::deletedValue())
                 location = StorageTraits::emptyValue();
-            Assigner<ValueTraits::needsRef, ValueType, StorageType, ValueTraits>::assign(key, location);
+            *(ValueType*)&location = key;
         }
     };
 
@@ -182,14 +182,8 @@ namespace WTF {
     inline HashSet<T, U, V>& HashSet<T, U, V>::operator=(const HashSet& other)
     {
         HashSet tmp(other);
-        swap(tmp); 
+        m_impl.swap(tmp.m_impl);
         return *this;
-    }
-
-    template<typename T, typename U, typename V>
-    inline void HashSet<T, U, V>::swap(HashSet& other)
-    {
-        m_impl.swap(other.m_impl); 
     }
 
     template<typename T, typename U, typename V>
@@ -262,7 +256,7 @@ namespace WTF {
     pair<typename HashSet<T, U, V>::iterator, bool> HashSet<T, U, V>::add(const ValueType &value)
     {
         const bool canReplaceDeletedValue = !ValueTraits::needsDestruction || StorageTraits::needsDestruction;
-        typedef HashSetTranslator<canReplaceDeletedValue, ValueType, ValueTraits, StorageTraits, HashFunctions> Translator;
+        typedef HashSetTranslator<canReplaceDeletedValue, ValueType, StorageTraits, HashFunctions> Translator;
         return m_impl.template add<ValueType, ValueType, Translator>(value, value);
     }
 
@@ -273,7 +267,7 @@ namespace WTF {
     {
         const bool canReplaceDeletedValue = !ValueTraits::needsDestruction || StorageTraits::needsDestruction;
         typedef HashSetTranslatorAdapter<canReplaceDeletedValue, ValueType, StorageTraits, T, Translator> Adapter;
-        return m_impl.template addPassingHashCode<T, T, Adapter>(value, value);
+        return m_impl.template add<T, T, Adapter>(value, value);
     }
 
     template<typename T, typename U, typename V>
@@ -281,9 +275,8 @@ namespace WTF {
     {
         if (it.m_impl == m_impl.end())
             return;
-        m_impl.checkTableConsistency();
         RefCounter<ValueTraits, StorageTraits>::deref(*it.m_impl);
-        m_impl.removeWithoutEntryConsistencyCheck(it.m_impl);
+        m_impl.remove(it.m_impl);
     }
 
     template<typename T, typename U, typename V>
@@ -313,22 +306,9 @@ namespace WTF {
     {
         deleteAllValues<typename HashSet<T, U, V>::ValueType>(collection.m_impl);
     }
-    
-    template<typename T, typename U, typename V, typename W>
-    inline void copyToVector(const HashSet<T, U, V>& collection, W& vector)
-    {
-        typedef typename HashSet<T, U, V>::const_iterator iterator;
-        
-        vector.resize(collection.size());
-        
-        iterator it = collection.begin();
-        iterator end = collection.end();
-        for (unsigned i = 0; it != end; ++it, ++i)
-            vector[i] = *it;
-    }  
 
 } // namespace WTF
 
 using WTF::HashSet;
 
-#endif /* WTF_HashSet_h */
+#endif /* KXMLCORE_HASH_SET_H */

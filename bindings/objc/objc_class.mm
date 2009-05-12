@@ -23,6 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
 #include "config.h"
 #include "objc_class.h"
 
@@ -32,24 +34,16 @@
 namespace KJS {
 namespace Bindings {
     
-static void deleteMethod(CFAllocatorRef, const void* value)
+ObjcClass::ObjcClass(ClassStructPtr aClass)
 {
-    delete static_cast<const Method*>(value);
-}
-    
-static void deleteField(CFAllocatorRef, const void* value)
-{
-    delete static_cast<const Field*>(value);
+    _isa = aClass;
+    _methods = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &MethodDictionaryValueCallBacks);
+    _fields = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &FieldDictionaryValueCallBacks);
 }
 
-const CFDictionaryValueCallBacks MethodDictionaryValueCallBacks = { 0, 0, &deleteMethod, 0 , 0 };
-const CFDictionaryValueCallBacks FieldDictionaryValueCallBacks = { 0, 0, &deleteField, 0 , 0 };    
-    
-ObjcClass::ObjcClass(ClassStructPtr aClass)
-    : _isa(aClass)
-    , _methods(AdoptCF, CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &MethodDictionaryValueCallBacks))
-    , _fields(AdoptCF, CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &FieldDictionaryValueCallBacks))
-{
+ObjcClass::~ObjcClass() {
+    CFRelease(_fields);
+    CFRelease(_methods);
 }
 
 static CFMutableDictionaryRef classesByIsA = 0;
@@ -78,12 +72,12 @@ const char* ObjcClass::name() const
     return object_getClassName(_isa);
 }
 
-MethodList ObjcClass::methodsNamed(const Identifier& identifier, Instance*) const
+MethodList ObjcClass::methodsNamed(const char* JSName, Instance*) const
 {
     MethodList methodList;
     char fixedSizeBuffer[1024];
     char* buffer = fixedSizeBuffer;
-    const char* JSName = identifier.ascii();
+
     if (!convertJSMethodNameToObjc(JSName, buffer, sizeof(fixedSizeBuffer))) {
         int length = strlen(JSName) + 1;
         buffer = new char[length];
@@ -91,17 +85,17 @@ MethodList ObjcClass::methodsNamed(const Identifier& identifier, Instance*) cons
             return methodList;
     }
 
-    
-    RetainPtr<CFStringRef> methodName(AdoptCF, CFStringCreateWithCString(NULL, buffer, kCFStringEncodingASCII));
-    Method* method = (Method*)CFDictionaryGetValue(_methods.get(), methodName.get());
+    CFStringRef methodName = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingASCII);
+    Method* method = (Method*)CFDictionaryGetValue(_methods, methodName);
     if (method) {
-        methodList.append(method);
+        CFRelease(methodName);
+        methodList.addMethod(method);
         return methodList;
     }
 
     ClassStructPtr thisClass = _isa;
-    while (thisClass && methodList.isEmpty()) {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+    while (thisClass && methodList.length() < 1) {
+#if OBJC_API_VERSION >= 2
         unsigned numMethodsInClass = 0;
         MethodStructPtr* objcMethodList = class_copyMethodList(thisClass, &numMethodsInClass);
 #else
@@ -111,14 +105,15 @@ MethodList ObjcClass::methodsNamed(const Identifier& identifier, Instance*) cons
             unsigned numMethodsInClass = objcMethodList->method_count;
 #endif
             for (unsigned i = 0; i < numMethodsInClass; i++) {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
                 MethodStructPtr objcMethod = objcMethodList[i];
                 SEL objcMethodSelector = method_getName(objcMethod);
+                const char* objcMethodSelectorName = sel_getName(objcMethodSelector);
 #else
                 struct objc_method* objcMethod = &objcMethodList->method_list[i];
                 SEL objcMethodSelector = objcMethod->method_name;
+                const char* objcMethodSelectorName = (const char*)objcMethodSelector;
 #endif
-                const char* objcMethodSelectorName = sel_getName(objcMethodSelector);
                 NSString* mappedName = nil;
 
                 // See if the class wants to exclude the selector from visibility in JavaScript.
@@ -132,14 +127,14 @@ MethodList ObjcClass::methodsNamed(const Identifier& identifier, Instance*) cons
                 if ([thisClass respondsToSelector:@selector(webScriptNameForSelector:)])
                     mappedName = [thisClass webScriptNameForSelector:objcMethodSelector];
 
-                if ((mappedName && [mappedName isEqual:(NSString*)methodName.get()]) || strcmp(objcMethodSelectorName, buffer) == 0) {
+                if ((mappedName && [mappedName isEqual:(NSString*)methodName]) || strcmp(objcMethodSelectorName, buffer) == 0) {
                     Method* aMethod = new ObjcMethod(thisClass, objcMethodSelectorName); // deleted when the dictionary is destroyed
-                    CFDictionaryAddValue(_methods.get(), methodName.get(), aMethod);
-                    methodList.append(aMethod);
+                    CFDictionaryAddValue(_methods, methodName, aMethod);
+                    methodList.addMethod(aMethod);
                     break;
                 }
             }
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
             thisClass = class_getSuperclass(thisClass);
             free(objcMethodList);
 #else
@@ -148,24 +143,26 @@ MethodList ObjcClass::methodsNamed(const Identifier& identifier, Instance*) cons
 #endif
     }
 
+    CFRelease(methodName);
     if (buffer != fixedSizeBuffer)
         delete [] buffer;
 
     return methodList;
 }
 
-Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) const
+Field* ObjcClass::fieldNamed(const char* name, Instance* instance) const
 {
     ClassStructPtr thisClass = _isa;
 
-    const char* name = identifier.ascii();
-    RetainPtr<CFStringRef> fieldName(AdoptCF, CFStringCreateWithCString(NULL, name, kCFStringEncodingASCII));
-    Field* aField = (Field*)CFDictionaryGetValue(_fields.get(), fieldName.get());
-    if (aField)
+    CFStringRef fieldName = CFStringCreateWithCString(NULL, name, kCFStringEncodingASCII);
+    Field* aField = (Field*)CFDictionaryGetValue(_fields, fieldName);
+    if (aField) {
+        CFRelease(fieldName);
         return aField;
+    }
 
     id targetObject = (static_cast<ObjcInstance*>(instance))->getObject();
-    id attributes = [targetObject respondsToSelector:@selector(attributeKeys)] ? [targetObject performSelector:@selector(attributeKeys)] : nil;
+    id attributes = [targetObject attributeKeys];
     if (attributes) {
         // Class overrides attributeKeys, use that array of key names.
         unsigned count = [attributes count];
@@ -185,9 +182,9 @@ Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) c
             if ([thisClass respondsToSelector:@selector(webScriptNameForKey:)])
                 mappedName = [thisClass webScriptNameForKey:UTF8KeyName];
 
-            if ((mappedName && [mappedName isEqual:(NSString*)fieldName.get()]) || [keyName isEqual:(NSString*)fieldName.get()]) {
+            if ((mappedName && [mappedName isEqual:(NSString*)fieldName]) || [keyName isEqual:(NSString*)fieldName]) {
                 aField = new ObjcField((CFStringRef)keyName); // deleted when the dictionary is destroyed
-                CFDictionaryAddValue(_fields.get(), fieldName.get(), aField);
+                CFDictionaryAddValue(_fields, fieldName, aField);
                 break;
             }
         }
@@ -196,7 +193,7 @@ Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) c
         // introspection.
 
         while (thisClass) {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
             unsigned numFieldsInClass = 0;
             IvarStructPtr* ivarsInClass = class_copyIvarList(thisClass, &numFieldsInClass);
 #else
@@ -205,7 +202,7 @@ Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) c
                 unsigned numFieldsInClass = fieldsInClass->ivar_count;
 #endif
                 for (unsigned i = 0; i < numFieldsInClass; i++) {
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
                     IvarStructPtr objcIVar = ivarsInClass[i];
                     const char* objcIvarName = ivar_getName(objcIVar);
 #else
@@ -225,13 +222,13 @@ Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) c
                     if ([thisClass respondsToSelector:@selector(webScriptNameForKey:)])
                         mappedName = [thisClass webScriptNameForKey:objcIvarName];
 
-                    if ((mappedName && [mappedName isEqual:(NSString*)fieldName.get()]) || strcmp(objcIvarName, name) == 0) {
+                    if ((mappedName && [mappedName isEqual:(NSString*)fieldName]) || strcmp(objcIvarName, name) == 0) {
                         aField = new ObjcField(objcIVar); // deleted when the dictionary is destroyed
-                        CFDictionaryAddValue(_fields.get(), fieldName.get(), aField);
+                        CFDictionaryAddValue(_fields, fieldName, aField);
                         break;
                     }
                 }
-#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+#if OBJC_API_VERSION >= 2
             thisClass = class_getSuperclass(thisClass);
             free(ivarsInClass);
 #else
@@ -239,6 +236,8 @@ Field* ObjcClass::fieldNamed(const Identifier& identifier, Instance* instance) c
             thisClass = thisClass->super_class;
 #endif
         }
+
+        CFRelease(fieldName);
     }
 
     return aField;
@@ -256,3 +255,5 @@ JSValue* ObjcClass::fallbackObject(ExecState*, Instance* instance, const Identif
 
 }
 }
+
+#endif //BINDINGS

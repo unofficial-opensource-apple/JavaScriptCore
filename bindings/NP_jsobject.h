@@ -26,10 +26,7 @@
 #ifndef NP_JSOBJECT_H
 #define NP_JSOBJECT_H
 
-#if ENABLE(NETSCAPE_API)
-
-#include "npruntime_internal.h"
-#include <wtf/Forward.h>
+#include "npruntime.h"
 
 namespace KJS {
     class JSObject;
@@ -44,12 +41,11 @@ struct JavaScriptObject
 {
     NPObject object;
     KJS::JSObject* imp;
-    KJS::Bindings::RootObject* rootObject;
+    const KJS::Bindings::RootObject* originExecutionContext;
+    const KJS::Bindings::RootObject* executionContext;
 };
 
-NPObject* _NPN_CreateScriptObject(NPP npp, KJS::JSObject*, PassRefPtr<KJS::Bindings::RootObject> rootObject);
+NPObject* _NPN_CreateScriptObject(NPP npp, KJS::JSObject*, const KJS::Bindings::RootObject* originExecutionContext, const KJS::Bindings::RootObject* executionContext);
 NPObject* _NPN_CreateNoScriptObject(void);
-
-#endif // ENABLE(NETSCAPE_API)
 
 #endif

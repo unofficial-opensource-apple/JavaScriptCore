@@ -23,6 +23,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#if BINDINGS
+
+#include <CoreFoundation/CoreFoundation.h>
+
 #ifndef BINDINGS_OBJC_INSTANCE_H_
 #define BINDINGS_OBJC_INSTANCE_H_
 
@@ -35,13 +39,18 @@ namespace Bindings {
 
 class ObjcClass;
 
-class ObjcInstance : public Instance {
+class ObjcInstance : public Instance
+{
 public:
-    ObjcInstance(ObjectStructPtr instance, PassRefPtr<RootObject>);
+    ObjcInstance(ObjectStructPtr instance);
         
     ~ObjcInstance();
     
     virtual Class *getClass() const;
+    
+    ObjcInstance(const ObjcInstance &other);
+
+    ObjcInstance &operator=(const ObjcInstance &other);
     
     virtual void begin();
     virtual void end();
@@ -54,21 +63,21 @@ public:
     virtual JSValue *invokeMethod(ExecState *exec, const MethodList &method, const List &args);
     virtual JSValue *invokeDefaultMethod(ExecState *exec, const List &args);
 
+    virtual void setValueOfField(ExecState *exec, const Field *aField, JSValue *aValue) const;
     virtual bool supportsSetValueOfUndefinedField();
     virtual void setValueOfUndefinedField(ExecState *exec, const Identifier &property, JSValue *aValue);
     
+    virtual JSValue *ObjcInstance::getValueOfField(ExecState *exec, const Field *aField) const;
     virtual JSValue *getValueOfUndefinedField(ExecState *exec, const Identifier &property, JSType hint) const;
 
-    ObjectStructPtr getObject() const { return _instance.get(); }
+    ObjectStructPtr getObject() const { return _instance; }
     
     JSValue *stringValue() const;
     JSValue *numberValue() const;
     JSValue *booleanValue() const;
-
-    virtual BindingLanguage getBindingLanguage() const { return ObjectiveCLanguage; }
-
+    
 private:
-    RetainPtr<ObjectStructPtr> _instance;
+    ObjectStructPtr _instance;
     mutable ObjcClass *_class;
     ObjectStructPtr _pool;
     int _beginCount;
@@ -78,4 +87,6 @@ private:
 
 } // namespace KJS
 
-#endif // BINDINGS_OBJC_INSTANCE_H_
+#endif //BINDINGS
+
+#endif

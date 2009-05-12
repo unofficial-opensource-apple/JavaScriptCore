@@ -22,6 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
+#if BINDINGS
 
 #ifndef RUNTIME_FUNCTION_H_
 #define RUNTIME_FUNCTION_H_
@@ -32,20 +33,30 @@
 
 namespace KJS {
 
-class RuntimeMethod : public InternalFunctionImp {
+
+class RuntimeMethod : public FunctionImp 
+{
 public:
     RuntimeMethod(ExecState *exec, const Identifier &n, Bindings::MethodList &methodList);
     
+    virtual ~RuntimeMethod();
+
     virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
 
     virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
 
+    virtual CodeType codeType() const;
+    
+    virtual Completion execute(ExecState *exec);
+
 private:
     static JSValue *lengthGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
 
-    OwnPtr<Bindings::MethodList> _methodList;
+    Bindings::MethodList _methodList;
 };
 
 } // namespace KJS
+
+#endif //BINDINGS
 
 #endif

@@ -3,7 +3,7 @@
  *  This file is part of the KDE libraries
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2006, 2007 Apple Inc.
+ *  Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -25,69 +25,37 @@
 #ifndef Parser_h
 #define Parser_h
 
-#include "SourceProvider.h"
-#include "nodes.h"
 #include <wtf/Forward.h>
-#include <wtf/Noncopyable.h>
-#include <wtf/OwnPtr.h>
-#include <wtf/RefPtr.h>
 
 namespace KJS {
 
-    class FunctionBodyNode;
+    class Node;
     class ProgramNode;
+    class UChar;
     class UString;
 
-    struct UChar;
-
-    template <typename T> struct ParserRefCountedData : ParserRefCounted {
-        T data;
-    };
-
-    class Parser : Noncopyable {
+    /**
+     * @internal
+     *
+     * Parses ECMAScript source code and converts into ProgramNode objects, which
+     * represent the root of a parse tree. This class provides a convenient workaround
+     * for the problem of the bison parser working in a static context.
+     */
+    class Parser {
     public:
-        template <class ParsedNode> PassRefPtr<ParsedNode> parse(PassRefPtr<SourceProvider>, int* errLine = 0, UString* errMsg = 0);
-        template <class ParsedNode> PassRefPtr<ParsedNode> parse(const SourceCode&, int* errLine = 0, UString* errMsg = 0);
+        static PassRefPtr<ProgramNode> parse(const UString& sourceURL, int startingLineNumber,
+            const UChar* code, unsigned length,
+            int* sourceId = 0, int* errLine = 0, UString* errMsg = 0);
 
-        void didFinishParsing(SourceElements*, ParserRefCountedData<DeclarationStacks::VarStack>*, 
-                              ParserRefCountedData<DeclarationStacks::FunctionStack>*, int lastLine);
+        static void accept(PassRefPtr<ProgramNode>);
 
-        void reparse(FunctionBodyNode*);
+        static void saveNewNode(Node*);
+        static void noteNodeCycle(Node*);
+        static void removeNodeCycle(Node*);
 
-    private:
-        friend Parser& parser();
-
-        void parse(int* errLine, UString* errMsg);
-
-        const SourceCode* m_source;
-        RefPtr<SourceElements> m_sourceElements;
-        RefPtr<ParserRefCountedData<DeclarationStacks::VarStack> > m_varDeclarations;
-        RefPtr<ParserRefCountedData<DeclarationStacks::FunctionStack> > m_funcDeclarations;
-        int m_lastLine;
+        static int sid;
     };
-    
-    Parser& parser(); // Returns the singleton JavaScript parser.
 
-    template <class ParsedNode> PassRefPtr<ParsedNode> Parser::parse(const SourceCode& source, int* errLine, UString* errMsg)
-    {
-        m_source = &source;
-        parse(errLine, errMsg);
-        RefPtr<ParsedNode> result;
-        if (m_sourceElements) {
-            result = ParsedNode::create(*m_source,
-                                        m_sourceElements.get(),
-                                        m_varDeclarations ? &m_varDeclarations->data : 0, 
-                                        m_funcDeclarations ? &m_funcDeclarations->data : 0);
-            result->setLoc(m_source->firstLine(), m_lastLine);
-        }
+} // namespace
 
-        m_source = 0;
-        m_sourceElements = 0;
-        m_varDeclarations = 0;
-        m_funcDeclarations = 0;
-        return result.release();
-    }
-
-} // namespace KJS
-
-#endif // Parser_h
+#endif

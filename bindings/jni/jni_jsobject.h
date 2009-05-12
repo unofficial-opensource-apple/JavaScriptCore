@@ -26,14 +26,10 @@
 #ifndef JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H
 #define JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H
 
-#if ENABLE(JAVA_BINDINGS)
-
-#if PLATFORM(MAC)
 #include <CoreFoundation/CoreFoundation.h>
-#endif
 
+#if BINDINGS_JAVA
 #include <JavaVM/jni.h>
-#include <wtf/RefPtr.h>
 
 #define jlong_to_ptr(a) ((void*)(uintptr_t)(a))
 #define jlong_to_impptr(a) (static_cast<KJS::JSObject*>(((void*)(uintptr_t)(a))))
@@ -94,13 +90,11 @@ public:
 
     jobject convertValueToJObject(JSValue*) const;
     JSValue* convertJObjectToValue(jobject) const;
-    void getListFromJArray(jobjectArray, List&) const;
-    
-    RootObject* rootObject() const;
+    List listFromJArray(jobjectArray) const;
     
 private:
-    RefPtr<RootObject> _rootObject;
-    JSObject* _imp;
+    const RootObject *_root;
+    JSObject *_imp;
 };
 
 
@@ -110,7 +104,7 @@ private:
 
 extern "C" {
 
-// The Java VM calls these functions to handle calls to methods in Java's JSObject class.
+// Functions called from the Java VM when making calls to the JavaJSObject class.
 jlong KJS_JSCreateNativeJSObject(JNIEnv*, jclass, jstring jurl, jlong nativeHandle, jboolean ctx);
 void KJS_JSObject_JSFinalize(JNIEnv*, jclass, jlong nativeJSObject);
 jobject KJS_JSObject_JSObjectCall(JNIEnv*, jclass, jlong nativeJSObject, jstring jurl, jstring methodName, jobjectArray args, jboolean ctx);
@@ -124,6 +118,5 @@ jstring KJS_JSObject_JSObjectToString(JNIEnv*, jclass, jlong nativeJSObject);
 
 }
 
-#endif // ENABLE(JAVA_BINDINGS)
-
-#endif // JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H
+#endif //BINDINGS_JAVA
+#endif
