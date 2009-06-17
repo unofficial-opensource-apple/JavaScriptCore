@@ -18,8 +18,8 @@
  *
  */
 
-#ifndef KXMLCORE_FORWARD_H
-#define KXMLCORE_FORWARD_H
+#ifndef WTF_Forward_h
+#define WTF_Forward_h
 
 #include <stddef.h>
 
@@ -29,6 +29,7 @@ namespace WTF {
     template<typename T> class OwnPtr;
     template<typename T> class PassRefPtr;
     template<typename T> class RefPtr;
+    template<typename T, size_t inlineCapacity> class Vector;
 }
 
 using WTF::ListRefPtr;
@@ -36,5 +37,7 @@ using WTF::OwnArrayPtr;
 using WTF::OwnPtr;
 using WTF::PassRefPtr;
 using WTF::RefPtr;
+using WTF::Vector;
 
-#endif
+#endif // WTF_Forward_h
+

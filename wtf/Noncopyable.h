@@ -1,4 +1,3 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
  *  Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -19,8 +18,8 @@
  *
  */
 
-#ifndef KXMLCORE_NONCOPYABLE
-#define KXMLCORE_NONCOPYABLE
+#ifndef WTF_Noncopyable_h
+#define WTF_Noncopyable_h
 
 // We don't want argument-dependent lookup to pull in everything from the WTF
 // namespace when you use Noncopyable, so put it in its own namespace.
@@ -39,4 +38,4 @@ namespace WTFNoncopyable {
 
 using WTFNoncopyable::Noncopyable;
 
-#endif // KXMLCORE_NONCOPYABLE
+#endif // WTF_Noncopyable_h

@@ -1,4 +1,4 @@
-// Copyright (c) 2005, Google Inc.
+// Copyright (c) 2005, 2007, Google Inc.
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without
@@ -38,21 +38,27 @@
 #else
 #include <sys/types.h>
 #endif
-#if !PLATFORM(WIN_OS)
+#if PLATFORM(WIN_OS)
+#include "windows.h"
+#else
+#include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <mach/mach.h>
 #endif
 #include <fcntl.h>
+#include "Assertions.h"
 #include "TCSystemAlloc.h"
 #include "TCSpinLock.h"
+#include "UnusedParam.h"
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-#if !defined(__arm__)
-#define VM_MEMORY_TCMALLOC -1
+#if PLATFORM(DARWIN) && defined(VM_MEMORY_TCMALLOC)
+static const int mmapFileDescriptor = VM_MAKE_TAG(VM_MEMORY_TCMALLOC);
+#else
+static const int mmapFileDescriptor = -1;
 #endif
 
 // Structure for discovering alignment
@@ -63,7 +69,7 @@ union MemoryAligner {
 };
 
 static SpinLock spinlock = SPINLOCK_INITIALIZER;
-  
+
 // Page size is initialized on demand
 static size_t pagesize = 0;
 
@@ -76,13 +82,24 @@ static size_t pagesize = 0;
 #ifndef WTF_CHANGES
 static bool use_devmem = false;
 #endif
+
+#if HAVE(SBRK)
 static bool use_sbrk = false;
+#endif
+
+#if HAVE(MMAP)
 static bool use_mmap = true;
+#endif 
+
+#if HAVE(VIRTUALALLOC)
+static bool use_VirtualAlloc = true;
+#endif
 
 // Flags to keep us from retrying allocators that failed.
 static bool devmem_failure = false;
 static bool sbrk_failure = false;
 static bool mmap_failure = false;
+static bool VirtualAlloc_failure = false;
 
 #ifndef WTF_CHANGES
 DEFINE_int32(malloc_devmem_start, 0,
@@ -98,8 +115,14 @@ static const int32_t FLAGS_malloc_devmem_limit = 0;
 
 #if HAVE(SBRK)
 
-static void* TrySbrk(size_t size, size_t alignment) {
+static void* TrySbrk(size_t size, size_t *actual_size, size_t alignment) {
   size = ((size + alignment - 1) / alignment) * alignment;
+  
+  // could theoretically return the "extra" bytes here, but this
+  // is simple and correct.
+  if (actual_size) 
+    *actual_size = size;
+    
   void* result = sbrk(size);
   if (result == reinterpret_cast<void*>(-1)) {
     sbrk_failure = true;
@@ -136,21 +159,26 @@ static void* TrySbrk(size_t size, size_t alignment) {
 
 #if HAVE(MMAP)
 
-static void* TryMmap(size_t size, size_t alignment) {
+static void* TryMmap(size_t size, size_t *actual_size, size_t alignment) {
   // Enforce page alignment
   if (pagesize == 0) pagesize = getpagesize();
   if (alignment < pagesize) alignment = pagesize;
   size = ((size + alignment - 1) / alignment) * alignment;
-
+  
+  // could theoretically return the "extra" bytes here, but this
+  // is simple and correct.
+  if (actual_size) 
+    *actual_size = size;
+    
   // Ask for extra memory if alignment > pagesize
   size_t extra = 0;
   if (alignment > pagesize) {
     extra = alignment - pagesize;
   }
   void* result = mmap(NULL, size + extra,
-                      PROT_READ|PROT_WRITE,
+                      PROT_READ | PROT_WRITE,
                       MAP_PRIVATE|MAP_ANONYMOUS,
-                      VM_MEMORY_TCMALLOC, 0);
+                      mmapFileDescriptor, 0);
   if (result == reinterpret_cast<void*>(MAP_FAILED)) {
     mmap_failure = true;
     return NULL;
@@ -177,8 +205,62 @@ static void* TryMmap(size_t size, size_t alignment) {
 
 #endif /* HAVE(MMAP) */
 
+#if HAVE(VIRTUALALLOC)
+
+static void* TryVirtualAlloc(size_t size, size_t *actual_size, size_t alignment) {
+  // Enforce page alignment
+  if (pagesize == 0) {
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+    pagesize = system_info.dwPageSize;
+  }
+
+  if (alignment < pagesize) alignment = pagesize;
+  size = ((size + alignment - 1) / alignment) * alignment;
+
+  // could theoretically return the "extra" bytes here, but this
+  // is simple and correct.
+  if (actual_size) 
+    *actual_size = size;
+    
+  // Ask for extra memory if alignment > pagesize
+  size_t extra = 0;
+  if (alignment > pagesize) {
+    extra = alignment - pagesize;
+  }
+  void* result = VirtualAlloc(NULL, size + extra,
+                              MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN, 
+                              PAGE_READWRITE);
+
+  if (result == NULL) {
+    VirtualAlloc_failure = true;
+    return NULL;
+  }
+
+  // Adjust the return memory so it is aligned
+  uintptr_t ptr = reinterpret_cast<uintptr_t>(result);
+  size_t adjust = 0;
+  if ((ptr & (alignment - 1)) != 0) {
+    adjust = alignment - (ptr & (alignment - 1));
+  }
+
+  // Return the unused memory to the system - we'd like to release but the best we can do
+  // is decommit, since Windows only lets you free the whole allocation.
+  if (adjust > 0) {
+    VirtualFree(reinterpret_cast<void*>(ptr), adjust, MEM_DECOMMIT);
+  }
+  if (adjust < extra) {
+    VirtualFree(reinterpret_cast<void*>(ptr + adjust + size), extra-adjust, MEM_DECOMMIT);
+  }
+
+  ptr += adjust;
+  return reinterpret_cast<void*>(ptr);
+}
+
+#endif /* HAVE(MMAP) */
+
 #ifndef WTF_CHANGES
-static void* TryDevMem(size_t size, size_t alignment) {
+static void* TryDevMem(size_t size, size_t *actual_size, size_t alignment) {
   static bool initialized = false;
   static off_t physmem_base;  // next physical memory address to allocate
   static off_t physmem_limit; // maximum physical address allowed
@@ -209,7 +291,12 @@ static void* TryDevMem(size_t size, size_t alignment) {
   if (pagesize == 0) pagesize = getpagesize();
   if (alignment < pagesize) alignment = pagesize;
   size = ((size + alignment - 1) / alignment) * alignment;
-
+    
+  // could theoretically return the "extra" bytes here, but this
+  // is simple and correct.
+  if (actual_size)
+    *actual_size = size;
+    
   // Ask for extra memory if alignment > pagesize
   size_t extra = 0;
   if (alignment > pagesize) {
@@ -221,7 +308,7 @@ static void* TryDevMem(size_t size, size_t alignment) {
     devmem_failure = true;
     return NULL;
   }
-  void *result = mmap(0, size + extra, PROT_WRITE|PROT_READ,
+  void *result = mmap(0, size + extra, PROT_READ | PROT_WRITE,
                       MAP_SHARED, physmem_fd, physmem_base);
   if (result == reinterpret_cast<void*>(MAP_FAILED)) {
     devmem_failure = true;
@@ -250,13 +337,10 @@ static void* TryDevMem(size_t size, size_t alignment) {
 }
 #endif
 
-void* TCMalloc_SystemAlloc(size_t size, size_t alignment) {
-#ifndef WTF_CHANGES
-  if (TCMallocDebug::level >= TCMallocDebug::kVerbose) {
-    MESSAGE("TCMalloc_SystemAlloc(%" PRIuS ", %" PRIuS")\n", 
-            size, alignment);
-  }
-#endif
+void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size, size_t alignment) {
+  // Discard requests that overflow
+  if (size + alignment < size) return NULL;
+    
   SpinLockHolder lock_holder(&spinlock);
 
   // Enforce minimum alignment
@@ -268,21 +352,28 @@ void* TCMalloc_SystemAlloc(size_t size, size_t alignment) {
 
 #ifndef WTF_CHANGES
     if (use_devmem && !devmem_failure) {
-      void* result = TryDevMem(size, alignment);
+      void* result = TryDevMem(size, actual_size, alignment);
       if (result != NULL) return result;
     }
 #endif
     
 #if HAVE(SBRK)
     if (use_sbrk && !sbrk_failure) {
-      void* result = TrySbrk(size, alignment);
+      void* result = TrySbrk(size, actual_size, alignment);
       if (result != NULL) return result;
     }
 #endif
 
 #if HAVE(MMAP)    
     if (use_mmap && !mmap_failure) {
-      void* result = TryMmap(size, alignment);
+      void* result = TryMmap(size, actual_size, alignment);
+      if (result != NULL) return result;
+    }
+#endif
+
+#if HAVE(VIRTUALALLOC)
+    if (use_VirtualAlloc && !VirtualAlloc_failure) {
+      void* result = TryVirtualAlloc(size, actual_size, alignment);
       if (result != NULL) return result;
     }
 #endif
@@ -291,6 +382,68 @@ void* TCMalloc_SystemAlloc(size_t size, size_t alignment) {
     devmem_failure = false;
     sbrk_failure = false;
     mmap_failure = false;
+    VirtualAlloc_failure = false;
   }
   return NULL;
 }
+
+void TCMalloc_SystemRelease(void* start, size_t length)
+{
+#if HAVE(MADV_FREE) || HAVE(MADV_DONTNEED)
+#if HAVE(MADV_FREE)
+  const int advice = MADV_FREE;
+#else
+  const int advice = MADV_DONTNEED;
+#endif
+  if (FLAGS_malloc_devmem_start) {
+    // It's not safe to use MADV_DONTNEED if we've been mapping
+    // /dev/mem for heap memory
+    return;
+  }
+  if (pagesize == 0) pagesize = getpagesize();
+  const size_t pagemask = pagesize - 1;
+
+  size_t new_start = reinterpret_cast<size_t>(start);
+  size_t end = new_start + length;
+  size_t new_end = end;
+
+  // Round up the starting address and round down the ending address
+  // to be page aligned:
+  new_start = (new_start + pagesize - 1) & ~pagemask;
+  new_end = new_end & ~pagemask;
+
+  ASSERT((new_start & pagemask) == 0);
+  ASSERT((new_end & pagemask) == 0);
+  ASSERT(new_start >= reinterpret_cast<size_t>(start));
+  ASSERT(new_end <= end);
+
+  if (new_end > new_start) {
+    // Note -- ignoring most return codes, because if this fails it
+    // doesn't matter...
+    while (madvise(reinterpret_cast<char*>(new_start), new_end - new_start,
+                   advice) == -1 &&
+           errno == EAGAIN) {
+      // NOP
+    }
+    return;
+  }
+#endif
+
+#if HAVE(MMAP)
+  void* newAddress = mmap(start, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, mmapFileDescriptor, 0);
+  // If the mmap failed then that's ok, we just won't return the memory to the system.
+  ASSERT_UNUSED(newAddress, newAddress == start || newAddress == reinterpret_cast<void*>(MAP_FAILED));
+  return;
+#endif
+
+#if !HAVE(MADV_DONTNEED) && !HAVE(MMAP)
+  UNUSED_PARAM(start);
+  UNUSED_PARAM(length);
+#endif
+}
+
+#if HAVE(VIRTUALALLOC)
+void TCMalloc_SystemCommit(void*, size_t)
+{
+}
+#endif

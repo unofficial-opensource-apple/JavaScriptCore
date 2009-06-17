@@ -1,7 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * This file is part of the KDE libraries
- * Copyright (C) 2005 Apple Computer, Inc.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,11 +18,12 @@
  *
  */
 
-#ifndef KXMLCORE_HASH_COUNTED_SET_H
-#define KXMLCORE_HASH_COUNTED_SET_H
+#ifndef WTF_HashCountedSet_h
+#define WTF_HashCountedSet_h
 
 #include "Assertions.h"
 #include "HashMap.h"
+#include "Vector.h"
 
 namespace WTF {
 
@@ -170,9 +169,36 @@ namespace WTF {
     {
         m_impl.clear(); 
     }
+    
+    template<typename Value, typename HashFunctions, typename Traits, typename VectorType>
+    inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits>& collection, VectorType& vector)
+    {
+        typedef typename HashCountedSet<Value, HashFunctions, Traits>::const_iterator iterator;
+        
+        vector.resize(collection.size());
+        
+        iterator it = collection.begin();
+        iterator end = collection.end();
+        for (unsigned i = 0; it != end; ++it, ++i)
+            vector[i] = *it;
+    }
+
+    template<typename Value, typename HashFunctions, typename Traits>
+    inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits>& collection, Vector<Value>& vector)
+    {
+        typedef typename HashCountedSet<Value, HashFunctions, Traits>::const_iterator iterator;
+        
+        vector.resize(collection.size());
+        
+        iterator it = collection.begin();
+        iterator end = collection.end();
+        for (unsigned i = 0; it != end; ++it, ++i)
+            vector[i] = (*it).first;
+    }
+
 
 } // namespace khtml
 
 using WTF::HashCountedSet;
 
-#endif /* KXMLCORE_HASH_COUNTED_SET_H */
+#endif /* WTF_HashCountedSet_h */

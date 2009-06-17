@@ -1,6 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- *  Copyright (C) 2006 Apple Computer, Inc.
+ *  Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -19,46 +18,106 @@
  *
  */
 
-#ifndef KXMLCORE_OWN_PTR_H
-#define KXMLCORE_OWN_PTR_H
+#ifndef WTF_OwnPtr_h
+#define WTF_OwnPtr_h
 
 #include <algorithm>
+#include <memory>
 #include <wtf/Assertions.h>
 #include <wtf/Noncopyable.h>
 
+#if PLATFORM(WIN)
+
+typedef struct HBITMAP__* HBITMAP;
+typedef struct HBRUSH__* HBRUSH;
+typedef struct HFONT__* HFONT;
+typedef struct HPALETTE__* HPALETTE;
+typedef struct HPEN__* HPEN;
+typedef struct HRGN__* HRGN;
+
+#endif
+
 namespace WTF {
+
+    // Unlike most of our smart pointers, OwnPtr can take either the pointer type or the pointed-to type.
+
+    // FIXME: Share a single RemovePointer class template with RetainPtr.
+    template <typename T> struct OwnPtrRemovePointer { typedef T type; };
+    template <typename T> struct OwnPtrRemovePointer<T*> { typedef T type; };
+
+    template <typename T> inline void deleteOwnedPtr(T* ptr)
+    {
+        typedef char known[sizeof(T) ? 1 : -1];
+        if (sizeof(known))
+            delete ptr;
+    }
+
+#if PLATFORM(WIN)
+    void deleteOwnedPtr(HBITMAP);
+    void deleteOwnedPtr(HBRUSH);
+    void deleteOwnedPtr(HFONT);
+    void deleteOwnedPtr(HPALETTE);
+    void deleteOwnedPtr(HPEN);
+    void deleteOwnedPtr(HRGN);
+#endif
 
     template <typename T> class OwnPtr : Noncopyable {
     public:
-        explicit OwnPtr(T* ptr = 0) : m_ptr(ptr) { }
-        ~OwnPtr() { safeDelete(); }
+        typedef typename OwnPtrRemovePointer<T>::type ValueType;
+        typedef ValueType* PtrType;
 
-        T* get() const { return m_ptr; }
-        T* release() { T* ptr = m_ptr; m_ptr = 0; return ptr; }
+        explicit OwnPtr(PtrType ptr = 0) : m_ptr(ptr) { }
+        OwnPtr(std::auto_ptr<ValueType> autoPtr) : m_ptr(autoPtr.release()) { }
+        ~OwnPtr() { deleteOwnedPtr(m_ptr); }
 
-        void set(T* ptr) { ASSERT(m_ptr != ptr); safeDelete(); m_ptr = ptr; }
-        void clear() { safeDelete(); m_ptr = 0; }
+        PtrType get() const { return m_ptr; }
+        PtrType release() { PtrType ptr = m_ptr; m_ptr = 0; return ptr; }
 
-        T& operator*() const { ASSERT(m_ptr); return *m_ptr; }
-        T* operator->() const { ASSERT(m_ptr); return m_ptr; }
+        // FIXME: This should be renamed to adopt. 
+        void set(PtrType ptr) { ASSERT(!ptr || m_ptr != ptr); deleteOwnedPtr(m_ptr); m_ptr = ptr; }
+
+        void adopt(std::auto_ptr<ValueType> autoPtr) { ASSERT(!autoPtr.get() || m_ptr != autoPtr.get()); deleteOwnedPtr(m_ptr); m_ptr = autoPtr.release(); }
+
+        void clear() { deleteOwnedPtr(m_ptr); m_ptr = 0; }
+
+        ValueType& operator*() const { ASSERT(m_ptr); return *m_ptr; }
+        PtrType operator->() const { ASSERT(m_ptr); return m_ptr; }
 
         bool operator!() const { return !m_ptr; }
 
         // This conversion operator allows implicit conversion to bool but not to other integer types.
-        typedef T* (OwnPtr::*UnspecifiedBoolType)() const;
-        operator UnspecifiedBoolType() const { return m_ptr ? &OwnPtr::get : 0; }
+        typedef PtrType OwnPtr::*UnspecifiedBoolType;
+        operator UnspecifiedBoolType() const { return m_ptr ? &OwnPtr::m_ptr : 0; }
 
         void swap(OwnPtr& o) { std::swap(m_ptr, o.m_ptr); }
 
     private:
-        void safeDelete() { typedef char known[sizeof(T) ? 1 : -1]; if (sizeof(known)) delete m_ptr; }
-
-        T* m_ptr;
+        PtrType m_ptr;
     };
     
     template <typename T> inline void swap(OwnPtr<T>& a, OwnPtr<T>& b) { a.swap(b); }
 
-    template <typename T> inline T* getPtr(const OwnPtr<T>& p)
+    template <typename T, typename U> inline bool operator==(const OwnPtr<T>& a, U* b)
+    { 
+        return a.get() == b; 
+    }
+    
+    template <typename T, typename U> inline bool operator==(T* a, const OwnPtr<U>& b) 
+    {
+        return a == b.get(); 
+    }
+
+    template <typename T, typename U> inline bool operator!=(const OwnPtr<T>& a, U* b)
+    {
+        return a.get() != b; 
+    }
+
+    template <typename T, typename U> inline bool operator!=(T* a, const OwnPtr<U>& b)
+    { 
+        return a != b.get(); 
+    }
+    
+    template <typename T> inline typename OwnPtr<T>::PtrType getPtr(const OwnPtr<T>& p)
     {
         return p.get();
     }
@@ -67,4 +126,4 @@ namespace WTF {
 
 using WTF::OwnPtr;
 
-#endif // KXMLCORE_OWN_PTR_H
+#endif // WTF_OwnPtr_h

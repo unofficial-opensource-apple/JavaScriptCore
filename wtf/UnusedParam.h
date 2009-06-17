@@ -1,4 +1,3 @@
-/* -*- mode: c++; c-basic-offset: 4 -*- */
 /*
  *  Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -19,12 +18,12 @@
  *
  */
 
-#ifndef KXMLCORE_UNUSED_PARAM
-#define KXMLCORE_UNUSED_PARAM
+#ifndef WTF_UnusedParam_h
+#define WTF_UnusedParam_h
 
 /* don't use this for C++, it should only be used in plain C files or
    ObjC methods, where leaving off the parameter name is not allowed. */
 
 #define UNUSED_PARAM(x) (void)x
 
-#endif
+#endif /* WTF_UnusedParam_h */

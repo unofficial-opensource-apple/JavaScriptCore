@@ -1,6 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- *  Copyright (C) 2005, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -19,8 +18,8 @@
  *
  */
 
-#ifndef KXMLCORE_LIST_REF_PTR_H
-#define KXMLCORE_LIST_REF_PTR_H
+#ifndef WTF_ListRefPtr_h
+#define WTF_ListRefPtr_h
 
 #include <wtf/RefPtr.h>
 
@@ -36,9 +35,10 @@ namespace WTF {
         // see comment in PassRefPtr.h for why this takes const reference
         template <typename U> ListRefPtr(const PassRefPtr<U>& o) : RefPtr<T>(o) {}
 
-        ~ListRefPtr() {
+        ~ListRefPtr()
+        {
             RefPtr<T> reaper = this->release();
-            while (reaper && reaper->refcount() == 1)
+            while (reaper && reaper->hasOneRef())
                 reaper = reaper->releaseNext(); // implicitly protects reaper->next, then derefs reaper
         }
         
@@ -58,4 +58,4 @@ namespace WTF {
 
 using WTF::ListRefPtr;
 
-#endif // KXMLCORE_LIST_REF_PTR_H
+#endif // WTF_ListRefPtr_h

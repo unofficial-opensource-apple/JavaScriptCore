@@ -1,7 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * This file is part of the KDE libraries
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,11 +18,12 @@
  *
  */
 
-#ifndef KXMLCORE_VECTOR_TRAITS_H
-#define KXMLCORE_VECTOR_TRAITS_H
+#ifndef WTF_VectorTraits_h
+#define WTF_VectorTraits_h
 
 #include "RefPtr.h"
 #include <utility>
+#include <memory>
 
 using std::pair;
 
@@ -60,6 +59,7 @@ namespace WTF {
         static const bool canMoveWithMemcpy = false;
         static const bool canCopyWithMemcpy = false;
         static const bool canFillWithMemset = false;
+        static const bool canCompareWithMemcmp = false;
     };
 
     template<typename T>
@@ -71,6 +71,7 @@ namespace WTF {
         static const bool canMoveWithMemcpy = true;
         static const bool canCopyWithMemcpy = true;
         static const bool canFillWithMemset = sizeof(T) == sizeof(char);
+        static const bool canCompareWithMemcmp = true;
     };
 
     template<typename T>
@@ -84,6 +85,7 @@ namespace WTF {
         static const bool canMoveWithMemcpy = true;
         static const bool canCopyWithMemcpy = false;
         static const bool canFillWithMemset = false;
+        static const bool canCompareWithMemcmp = true;
     };
 
     // we know RefPtr is simple enough that initializing to 0 and moving with memcpy
@@ -91,6 +93,9 @@ namespace WTF {
     template<typename P>
     struct VectorTraits<RefPtr<P> > : SimpleClassVectorTraits { };
     
+    template<typename P>
+    struct VectorTraits<std::auto_ptr<P> > : SimpleClassVectorTraits { };
+
     template<typename First, typename Second>
     struct VectorTraits<pair<First, Second> >
     {
@@ -103,6 +108,7 @@ namespace WTF {
         static const bool canMoveWithMemcpy = FirstTraits::canMoveWithMemcpy && SecondTraits::canMoveWithMemcpy;
         static const bool canCopyWithMemcpy = FirstTraits::canCopyWithMemcpy && SecondTraits::canCopyWithMemcpy;
         static const bool canFillWithMemset = false;
+        static const bool canCompareWithMemcmp = FirstTraits::canCompareWithMemcmp && SecondTraits::canCompareWithMemcmp;
     };
 
 } // namespace WTF
@@ -110,4 +116,4 @@ namespace WTF {
 using WTF::VectorTraits;
 using WTF::SimpleClassVectorTraits;
 
-#endif // KXMLCORE_VECTOR_TRAITS_H
+#endif // WTF_VectorTraits_h
