@@ -1,4 +1,4 @@
-# Copyright (C) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (C) 2006, 2007, 2008, 2009, 2011 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,39 +25,82 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 VPATH = \
-    $(JavaScriptCore)/kjs \
+    $(JavaScriptCore) \
+    $(JavaScriptCore)/parser \
+    $(JavaScriptCore)/docs \
+    $(JavaScriptCore)/runtime \
+    $(JavaScriptCore)/interpreter \
+    $(JavaScriptCore)/jit \
 #
 
 .PHONY : all
 all : \
-    array_object.lut.h \
-    chartables.c \
-    date_object.lut.h \
-    grammar.cpp \
-    lexer.lut.h \
-    math_object.lut.h \
-    number_object.lut.h \
-    regexp_object.lut.h \
-    string_object.lut.h \
+    ArrayConstructor.lut.h \
+    ArrayPrototype.lut.h \
+    BooleanPrototype.lut.h \
+    DateConstructor.lut.h \
+    DatePrototype.lut.h \
+    ErrorPrototype.lut.h \
+    HeaderDetection.h \
+    JSONObject.lut.h \
+    JavaScriptCore.JSVALUE32_64.exp \
+    JavaScriptCore.JSVALUE64.exp \
+    JSGlobalObject.lut.h \
+    KeywordLookup.h \
+    Lexer.lut.h \
+    MathObject.lut.h \
+    NumberConstructor.lut.h \
+    NumberPrototype.lut.h \
+    ObjectConstructor.lut.h \
+    ObjectPrototype.lut.h \
+    RegExpConstructor.lut.h \
+    RegExpPrototype.lut.h \
+    RegExpJitTables.h \
+    RegExpObject.lut.h \
+    StringConstructor.lut.h \
+    StringPrototype.lut.h \
+    docs/bytecode.html \
 #
 
 # lookup tables for classes
 
 %.lut.h: create_hash_table %.cpp
 	$^ -i > $@
-lexer.lut.h: create_hash_table keywords.table
+Lexer.lut.h: create_hash_table Keywords.table
 	$^ > $@
 
-# JavaScript language grammar
+docs/bytecode.html: make-bytecode-docs.pl Interpreter.cpp 
+	perl $^ $@
 
-grammar.cpp : grammar.y
-	bison -d -p kjsyy $< -o $@
-	touch grammar.cpp.h
-	touch grammar.hpp
-	cat grammar.cpp.h grammar.hpp > grammar.h
-	rm -f grammar.cpp.h grammar.hpp
+# character tables for Yarr
 
-# character tables for PCRE
+RegExpJitTables.h: create_regex_tables
+	python $^ > $@
 
-chartables.c : $(BUILT_PRODUCTS_DIR)/dftables
-	$^ $@
+KeywordLookup.h: KeywordLookupGenerator.py Keywords.table
+	python $^ > $@
+
+# export files
+
+JavaScriptCore.JSVALUE32_64.exp: JavaScriptCore.exp JavaScriptCore.JSVALUE32_64only.exp
+	cat $^ > $@
+
+JavaScriptCore.JSVALUE64.exp: JavaScriptCore.exp JavaScriptCore.JSVALUE64only.exp
+	cat $^ > $@
+
+
+# header detection
+
+ifeq ($(OS),MACOS)
+
+HeaderDetection.h : DerivedSources.make /System/Library/CoreServices/SystemVersion.plist
+	rm -f $@
+	echo "/* This is a generated file. Do not edit. */" > $@
+	if [ -f $(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/pthread_machdep.h ]; then echo "#define HAVE_PTHREAD_MACHDEP_H 1" >> $@; else echo >> $@; fi
+
+else
+
+HeaderDetection.h :
+	echo > $@
+
+endif

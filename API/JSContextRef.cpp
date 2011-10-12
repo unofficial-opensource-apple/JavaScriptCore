@@ -1,6 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,49 +23,218 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "APICast.h"
+#include "config.h"
 #include "JSContextRef.h"
+#include "JSContextRefPrivate.h"
 
+#include "APICast.h"
+#include "InitializeThreading.h"
+#include <interpreter/CallFrame.h>
+#include <interpreter/Interpreter.h>
 #include "JSCallbackObject.h"
-#include "completion.h"
-#include "interpreter.h"
-#include "object.h"
+#include "JSClassRef.h"
+#include "JSGlobalObject.h"
+#include "JSObject.h"
+#include "UStringBuilder.h"
+#include <wtf/text/StringHash.h>
 
-using namespace KJS;
+
+#if OS(DARWIN)
+#include <mach-o/dyld.h>
+
+static const int32_t webkitFirstVersionWithConcurrentGlobalContexts = 0x2100500; // 528.5.0
+#endif
+
+using namespace JSC;
+
+JSContextGroupRef JSContextGroupCreate()
+{
+    initializeThreading();
+    return toRef(JSGlobalData::createContextGroup(ThreadStackTypeSmall).leakRef());
+}
+
+JSContextGroupRef JSContextGroupRetain(JSContextGroupRef group)
+{
+    toJS(group)->ref();
+    return group;
+}
+
+void JSContextGroupRelease(JSContextGroupRef group)
+{
+    toJS(group)->deref();
+}
 
 JSGlobalContextRef JSGlobalContextCreate(JSClassRef globalObjectClass)
 {
-    JSLock lock;
+    initializeThreading();
+#if OS(DARWIN)
+    // When running on Tiger or Leopard, or if the application was linked before JSGlobalContextCreate was changed
+    // to use a unique JSGlobalData, we use a shared one for compatibility.
+#ifndef BUILDING_ON_LEOPARD
+    if (NSVersionOfLinkTimeLibrary("JavaScriptCore") <= webkitFirstVersionWithConcurrentGlobalContexts) {
+#else
+    {
+#endif
+        JSLock lock(LockForReal);
+        return JSGlobalContextCreateInGroup(toRef(&JSGlobalData::sharedInstance()), globalObjectClass);
+    }
+#endif // OS(DARWIN)
 
-    JSObject* globalObject;
-    if (globalObjectClass)
-        // FIXME: We need to pass a real ExecState here to support an initialize callback in globalObjectClass
-        globalObject = new JSCallbackObject(0, globalObjectClass, 0, 0);
-    else
-        globalObject = new JSObject();
+    return JSGlobalContextCreateInGroup(0, globalObjectClass);
+}
 
-    Interpreter* interpreter = new Interpreter(globalObject); // adds the built-in object prototype to the global object
-    JSGlobalContextRef ctx = reinterpret_cast<JSGlobalContextRef>(interpreter->globalExec());
-    return JSGlobalContextRetain(ctx);
+JSGlobalContextRef JSGlobalContextCreateInGroup(JSContextGroupRef group, JSClassRef globalObjectClass)
+{
+    initializeThreading();
+
+    JSLock lock(LockForReal);
+    RefPtr<JSGlobalData> globalData = group ? PassRefPtr<JSGlobalData>(toJS(group)) : JSGlobalData::createContextGroup(ThreadStackTypeSmall);
+
+    APIEntryShim entryShim(globalData.get(), false);
+
+#if ENABLE(JSC_MULTIPLE_THREADS)
+    globalData->makeUsableFromMultipleThreads();
+#endif
+
+    if (!globalObjectClass) {
+        JSGlobalObject* globalObject = new (globalData.get()) JSGlobalObject(*globalData, JSGlobalObject::createStructure(*globalData, jsNull()));
+        return JSGlobalContextRetain(toGlobalRef(globalObject->globalExec()));
+    }
+
+    JSGlobalObject* globalObject = new (globalData.get()) JSCallbackObject<JSGlobalObject>(*globalData, globalObjectClass, JSCallbackObject<JSGlobalObject>::createStructure(*globalData, jsNull()));
+    ExecState* exec = globalObject->globalExec();
+    JSValue prototype = globalObjectClass->prototype(exec);
+    if (!prototype)
+        prototype = jsNull();
+    globalObject->resetPrototype(*globalData, prototype);
+    return JSGlobalContextRetain(toGlobalRef(exec));
 }
 
 JSGlobalContextRef JSGlobalContextRetain(JSGlobalContextRef ctx)
 {
-    JSLock lock;
     ExecState* exec = toJS(ctx);
-    exec->dynamicInterpreter()->ref();
+    APIEntryShim entryShim(exec);
+
+    JSGlobalData& globalData = exec->globalData();
+    gcProtect(exec->dynamicGlobalObject());
+    globalData.ref();
     return ctx;
 }
 
 void JSGlobalContextRelease(JSGlobalContextRef ctx)
 {
-    JSLock lock;
     ExecState* exec = toJS(ctx);
-    exec->dynamicInterpreter()->deref();
+    JSLock lock(exec);
+
+    JSGlobalData& globalData = exec->globalData();
+    JSGlobalObject* dgo = exec->dynamicGlobalObject();
+    IdentifierTable* savedIdentifierTable = wtfThreadData().setCurrentIdentifierTable(globalData.identifierTable);
+
+    // One reference is held by JSGlobalObject, another added by JSGlobalContextRetain().
+    bool releasingContextGroup = globalData.refCount() == 2;
+    bool releasingGlobalObject = Heap::heap(dgo)->unprotect(dgo);
+    // If this is the last reference to a global data, it should also
+    // be the only remaining reference to the global object too!
+    ASSERT(!releasingContextGroup || releasingGlobalObject);
+
+    // An API 'JSGlobalContextRef' retains two things - a global object and a
+    // global data (or context group, in API terminology).
+    // * If this is the last reference to any contexts in the given context group,
+    //   call destroy on the heap (the global data is being  freed).
+    // * If this was the last reference to the global object, then unprotecting
+    //   it may release a lot of GC memory - tickle the activity callback to
+    //   garbage collect soon.
+    // * If there are more references remaining the the global object, then do nothing
+    //   (specifically that is more protects, which we assume come from other JSGlobalContextRefs).
+    if (releasingContextGroup) {
+        globalData.clearBuiltinStructures();
+        globalData.heap.destroy();
+    } else if (releasingGlobalObject) {
+        globalData.heap.activityCallback()->synchronize();
+        (*globalData.heap.activityCallback())();
+    }
+
+    globalData.deref();
+
+    wtfThreadData().setCurrentIdentifierTable(savedIdentifierTable);
 }
 
 JSObjectRef JSContextGetGlobalObject(JSContextRef ctx)
 {
     ExecState* exec = toJS(ctx);
-    return toRef(exec->dynamicInterpreter()->globalObject());
+    APIEntryShim entryShim(exec);
+
+    // It is necessary to call toThisObject to get the wrapper object when used with WebCore.
+    return toRef(exec->lexicalGlobalObject()->toThisObject(exec));
 }
+
+JSContextGroupRef JSContextGetGroup(JSContextRef ctx)
+{
+    ExecState* exec = toJS(ctx);
+    return toRef(&exec->globalData());
+}
+
+JSGlobalContextRef JSContextGetGlobalContext(JSContextRef ctx)
+{
+    ExecState* exec = toJS(ctx);
+    APIEntryShim entryShim(exec);
+
+    return toGlobalRef(exec->lexicalGlobalObject()->globalExec());
+}
+    
+JSStringRef JSContextCreateBacktrace(JSContextRef ctx, unsigned maxStackSize)
+{
+    ExecState* exec = toJS(ctx);
+    JSLock lock(exec);
+
+    unsigned count = 0;
+    UStringBuilder builder;
+    CallFrame* callFrame = exec;
+    UString functionName;
+    if (exec->callee()) {
+        if (asObject(exec->callee())->inherits(&InternalFunction::s_info)) {
+            functionName = asInternalFunction(exec->callee())->name(exec);
+            builder.append("#0 ");
+            builder.append(functionName);
+            builder.append("() ");
+            count++;
+        }
+    }
+    while (true) {
+        ASSERT(callFrame);
+        int signedLineNumber;
+        intptr_t sourceID;
+        UString urlString;
+        JSValue function;
+        
+        UString levelStr = UString::number(count);
+        
+        exec->interpreter()->retrieveLastCaller(callFrame, signedLineNumber, sourceID, urlString, function);
+
+        if (function)
+            functionName = asFunction(function)->name(exec);
+        else {
+            // Caller is unknown, but if frame is empty we should still add the frame, because
+            // something called us, and gave us arguments.
+            if (count)
+                break;
+        }
+        unsigned lineNumber = signedLineNumber >= 0 ? signedLineNumber : 0;
+        if (!builder.isEmpty())
+            builder.append("\n");
+        builder.append("#");
+        builder.append(levelStr);
+        builder.append(" ");
+        builder.append(functionName);
+        builder.append("() at ");
+        builder.append(urlString);
+        builder.append(":");
+        builder.append(UString::number(lineNumber));
+        if (!function || ++count == maxStackSize)
+            break;
+        callFrame = callFrame->callerFrame();
+    }
+    return OpaqueJSString::create(builder.toUString()).leakRef();
+}
+
+

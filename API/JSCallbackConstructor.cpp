@@ -1,6 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,18 +23,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#include "config.h"
 #include "JSCallbackConstructor.h"
+
+#include "APIShims.h"
 #include "APICast.h"
+#include <runtime/Error.h>
+#include <runtime/JSGlobalObject.h>
+#include <runtime/JSLock.h>
+#include <runtime/ObjectPrototype.h>
+#include <wtf/Vector.h>
 
-namespace KJS {
+namespace JSC {
 
-const ClassInfo JSCallbackConstructor::info = { "CallbackConstructor", 0, 0, 0 };
+const ClassInfo JSCallbackConstructor::s_info = { "CallbackConstructor", &JSObjectWithGlobalObject::s_info, 0, 0 };
 
-JSCallbackConstructor::JSCallbackConstructor(ExecState* exec, JSClassRef jsClass, JSObjectCallAsConstructorCallback callback)
-    : JSObject(exec->lexicalInterpreter()->builtinObjectPrototype())
+JSCallbackConstructor::JSCallbackConstructor(JSGlobalObject* globalObject, Structure* structure, JSClassRef jsClass, JSObjectCallAsConstructorCallback callback)
+    : JSObjectWithGlobalObject(globalObject, structure)
     , m_class(jsClass)
     , m_callback(callback)
 {
+    ASSERT(inherits(&s_info));
     if (m_class)
         JSClassRetain(jsClass);
 }
@@ -46,30 +54,37 @@ JSCallbackConstructor::~JSCallbackConstructor()
         JSClassRelease(m_class);
 }
 
-bool JSCallbackConstructor::implementsHasInstance() const
+static EncodedJSValue JSC_HOST_CALL constructJSCallback(ExecState* exec)
 {
-    return true;
-}
-
-bool JSCallbackConstructor::implementsConstruct() const
-{
-    return true;
-}
-
-JSObject* JSCallbackConstructor::construct(ExecState* exec, const List &args)
-{
+    JSObject* constructor = exec->callee();
     JSContextRef ctx = toRef(exec);
-    JSObjectRef thisRef = toRef(this);
+    JSObjectRef constructorRef = toRef(constructor);
 
-    if (m_callback) {
-        size_t argumentCount = args.size();
-        JSValueRef arguments[argumentCount];
-        for (size_t i = 0; i < argumentCount; i++)
-            arguments[i] = toRef(args[i]);
-        return toJS(m_callback(ctx, thisRef, argumentCount, arguments, toRef(exec->exceptionSlot())));
+    JSObjectCallAsConstructorCallback callback = static_cast<JSCallbackConstructor*>(constructor)->callback();
+    if (callback) {
+        int argumentCount = static_cast<int>(exec->argumentCount());
+        Vector<JSValueRef, 16> arguments(argumentCount);
+        for (int i = 0; i < argumentCount; i++)
+            arguments[i] = toRef(exec, exec->argument(i));
+
+        JSValueRef exception = 0;
+        JSObjectRef result;
+        {
+            APICallbackShim callbackShim(exec);
+            result = callback(ctx, constructorRef, argumentCount, arguments.data(), &exception);
+        }
+        if (exception)
+            throwError(exec, toJS(exec, exception));
+        return JSValue::encode(toJS(result));
     }
     
-    return toJS(JSObjectMake(ctx, m_class, 0));
+    return JSValue::encode(toJS(JSObjectMake(ctx, static_cast<JSCallbackConstructor*>(constructor)->classRef(), 0)));
 }
 
-} // namespace KJS
+ConstructType JSCallbackConstructor::getConstructData(ConstructData& constructData)
+{
+    constructData.native.function = constructJSCallback;
+    return ConstructTypeHost;
+}
+
+} // namespace JSC

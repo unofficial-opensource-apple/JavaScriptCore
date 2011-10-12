@@ -1,6 +1,6 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2003, 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007-2009 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -21,34 +21,87 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+// The vprintf_stderr_common function triggers this error in the Mac build.
+// Feel free to remove this pragma if this file builds on Mac.
+// According to http://gcc.gnu.org/onlinedocs/gcc-4.2.1/gcc/Diagnostic-Pragmas.html#Diagnostic-Pragmas
+// we need to place this directive before any data or functions are defined.
+#pragma GCC diagnostic ignored "-Wmissing-format-attribute"
 
 #include "config.h"
 #include "Assertions.h"
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 
-#if PLATFORM(MAC)
 #include <CoreFoundation/CFString.h>
+
+#if COMPILER(MSVC) && !OS(WINCE) && !PLATFORM(BREWMP)
+#ifndef WINVER
+#define WINVER 0x0500
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0500
+#endif
+#include <crtdbg.h>
+#endif
+
+#if OS(WINDOWS)
+#include <windows.h>
+#endif
+
+#if PLATFORM(BREWMP)
+#include <AEEdbg.h>
+#include <wtf/Vector.h>
+#endif
+
+#if PLATFORM(MAC)
+#include <cxxabi.h>
+#include <dlfcn.h>
+#include <execinfo.h>
 #endif
 
 extern "C" {
 
-// This is to work around the "you should use a printf format attribute" warning on GCC
-// We can't use _attribute__ ((format (printf, 2, 3))) since we allow %@
-static int (* vfprintf_no_warning)(FILE *, const char *, va_list) = vfprintf;
+#if PLATFORM(BREWMP)
 
-static void vprintf_stderr_common(const char *format, va_list args)
+static void printLog(const Vector<char>& buffer)
 {
-#if PLATFORM(MAC)
+    // Each call to DBGPRINTF generates at most 128 bytes of output on the Windows SDK.
+    // On Qualcomm chipset targets, DBGPRINTF() comes out the diag port (though this may change).
+    // The length of each output string is constrained even more than on the Windows SDK.
+#if COMPILER(MSVC)
+    const int printBufferSize = 128;
+#else
+    const int printBufferSize = 32;
+#endif
+
+    char printBuffer[printBufferSize + 1];
+    printBuffer[printBufferSize] = 0; // to guarantee null termination
+
+    const char* p = buffer.data();
+    const char* end = buffer.data() + buffer.size();
+    while (p < end) {
+        strncpy(printBuffer, p, printBufferSize);
+        dbg_Message(printBuffer, DBG_MSG_LEVEL_HIGH, __FILE__, __LINE__);
+        p += printBufferSize;
+    }
+}
+
+#endif
+
+WTF_ATTRIBUTE_PRINTF(1, 0)
+static void vprintf_stderr_common(const char* format, va_list args)
+{
     if (strstr(format, "%@")) {
         CFStringRef cfFormat = CFStringCreateWithCString(NULL, format, kCFStringEncodingUTF8);
         CFStringRef str = CFStringCreateWithFormatAndArguments(NULL, NULL, cfFormat, args);
-        
+
         int length = CFStringGetMaximumSizeForEncoding(CFStringGetLength(str), kCFStringEncodingUTF8);
-        char *buffer = (char *)malloc(length + 1);
+        char* buffer = (char*)malloc(length + 1);
 
         CFStringGetCString(str, buffer, length, kCFStringEncodingUTF8);
 
@@ -57,65 +110,142 @@ static void vprintf_stderr_common(const char *format, va_list args)
         free(buffer);
         CFRelease(str);
         CFRelease(cfFormat);
-    } else
+        return;
+    }
+#if OS(SYMBIAN)
+    vfprintf(stdout, format, args);
+#else
+    vfprintf(stderr, format, args);
 #endif
-        vfprintf_no_warning(stderr, format, args);
 }
 
-void WTFReportAssertionFailure(const char *file, int line, const char *function, const char *assertion)
+WTF_ATTRIBUTE_PRINTF(1, 2)
+static void printf_stderr_common(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vprintf_stderr_common(format, args);
+    va_end(args);
+}
+
+static void printCallSite(const char* file, int line, const char* function)
+{
+#if OS(WINDOWS) && !OS(WINCE) && defined(_DEBUG)
+    _CrtDbgReport(_CRT_WARN, file, line, NULL, "%s\n", function);
+#else
+    // By using this format, which matches the format used by MSVC for compiler errors, developers
+    // using Visual Studio can double-click the file/line number in the Output Window to have the
+    // editor navigate to that line of code. It seems fine for other developers, too.
+    printf_stderr_common("%s(%d) : %s\n", file, line, function);
+#endif
+}
+
+void WTFReportAssertionFailure(const char* file, int line, const char* function, const char* assertion)
 {
     if (assertion)
-        fprintf(stderr, "=================\nASSERTION FAILED: %s (%s:%d %s)\n=================\n", assertion, file, line, function);
+        printf_stderr_common("ASSERTION FAILED: %s\n", assertion);
     else
-        fprintf(stderr, "=================\nSHOULD NEVER BE REACHED (%s:%d %s)\n=================\n", file, line, function);
+        printf_stderr_common("SHOULD NEVER BE REACHED\n");
+    printCallSite(file, line, function);
 }
 
-void WTFReportAssertionFailureWithMessage(const char *file, int line, const char *function, const char *assertion, const char *format, ...)
+void WTFReportAssertionFailureWithMessage(const char* file, int line, const char* function, const char* assertion, const char* format, ...)
 {
-    fprintf(stderr, "=================\nASSERTION FAILED: ");
+    printf_stderr_common("ASSERTION FAILED: ");
     va_list args;
     va_start(args, format);
     vprintf_stderr_common(format, args);
     va_end(args);
-    fprintf(stderr, "\n%s (%s:%d %s)\n=================\n", assertion, file, line, function);
+    printf_stderr_common("\n%s\n", assertion);
+    printCallSite(file, line, function);
 }
 
-void WTFReportArgumentAssertionFailure(const char *file, int line, const char *function, const char *argName, const char *assertion)
+void WTFReportArgumentAssertionFailure(const char* file, int line, const char* function, const char* argName, const char* assertion)
 {
-    fprintf(stderr, "=================\nARGUMENT BAD: %s, %s (%s:%d %s)\n=================\n", argName, assertion, file, line, function);
+    printf_stderr_common("ARGUMENT BAD: %s, %s\n", argName, assertion);
+    printCallSite(file, line, function);
 }
 
-void WTFReportFatalError(const char *file, int line, const char *function, const char *format, ...)
+void WTFReportBacktrace()
 {
-    fprintf(stderr, "=================\nFATAL ERROR: ");
+#if PLATFORM(MAC)
+    static const int maxFrames = 32;
+    void* samples[maxFrames];
+    int frames = backtrace(samples, maxFrames);
+
+    for (int i = 1; i < frames; ++i) {
+        void* pointer = samples[i];
+
+        // Try to get a symbol name from the dynamic linker.
+        Dl_info info;
+        if (dladdr(pointer, &info) && info.dli_sname) {
+            const char* mangledName = info.dli_sname;
+
+            // Assume c++ & try to demangle the name.
+            char* demangledName = abi::__cxa_demangle(mangledName, 0, 0, 0);
+            if (demangledName) {
+                fprintf(stderr, "%-3d %s\n", i, demangledName);
+                free(demangledName);
+            } else
+                fprintf(stderr, "%-3d %s\n", i, mangledName);
+        } else
+            fprintf(stderr, "%-3d %p\n", i, pointer);
+    }
+#endif
+}
+
+void WTFReportFatalError(const char* file, int line, const char* function, const char* format, ...)
+{
+    printf_stderr_common("FATAL ERROR: ");
     va_list args;
     va_start(args, format);
     vprintf_stderr_common(format, args);
     va_end(args);
-    fprintf(stderr, "\n(%s:%d %s)\n=================\n", file, line, function);
+    printf_stderr_common("\n");
+    printCallSite(file, line, function);
 }
 
-void WTFReportError(const char *file, int line, const char *function, const char *format, ...)
+void WTFReportError(const char* file, int line, const char* function, const char* format, ...)
 {
-    fprintf(stderr, "=================\nERROR: ");
+    printf_stderr_common("ERROR: ");
     va_list args;
     va_start(args, format);
     vprintf_stderr_common(format, args);
     va_end(args);
-    fprintf(stderr, "\n(%s:%d %s)\n=================\n", file, line, function);
+    printf_stderr_common("\n");
+    printCallSite(file, line, function);
 }
 
-void WTFLog(const char*, int, const char*, WTFLogChannel *channel, const char *format, ...)
-{    
+void WTFLog(WTFLogChannel* channel, const char* format, ...)
+{
     if (channel->state != WTFLogChannelOn)
         return;
-    
+
     va_list args;
     va_start(args, format);
     vprintf_stderr_common(format, args);
     va_end(args);
-    if (format[strlen(format) - 1] != '\n')
-        putc('\n', stderr);
+    
+    size_t formatLength = strlen(format);
+    if (formatLength && format[formatLength - 1] != '\n')
+        printf_stderr_common("\n");
+}
+
+void WTFLogVerbose(const char* file, int line, const char* function, WTFLogChannel* channel, const char* format, ...)
+{
+    if (channel->state != WTFLogChannelOn)
+        return;
+
+    va_list args;
+    va_start(args, format);
+    vprintf_stderr_common(format, args);
+    va_end(args);
+
+    size_t formatLength = strlen(format);
+    if (formatLength && format[formatLength - 1] != '\n')
+        printf_stderr_common("\n");
+
+    printCallSite(file, line, function);
 }
 
 } // extern "C"
